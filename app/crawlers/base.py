@@ -15,6 +15,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
+from urllib.parse import urlparse
 
 
 @dataclass
@@ -63,7 +64,13 @@ class CrawlerRegistry:
     @classmethod
     def for_url(cls, url: str) -> Optional[BaseCrawler]:
         """Pick the right crawler based on the article URL hostname."""
+        host = (urlparse(url).hostname or "").lower()
         for crawler in cls._registry.values():
-            if crawler.source_id in url:
+            if crawler.source_id in host:
                 return crawler
         return None
+
+    @classmethod
+    def all(cls) -> dict[str, "BaseCrawler"]:
+        """Return all registered crawlers keyed by source_id."""
+        return dict(cls._registry)

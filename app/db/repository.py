@@ -56,11 +56,12 @@ class GraphRepository:
             return existing_id
 
         person_id = _uuid()
-        self._s.add(Person(id=person_id, canonical_name=canonical_name, bio=bio))
         try:
-            await self._s.flush()
+            # SAVEPOINT: a concurrent insert of the same canonical_name rolls
+            # back only this insert, not the caller's outer transaction.
+            async with self._s.begin_nested():
+                self._s.add(Person(id=person_id, canonical_name=canonical_name, bio=bio))
         except IntegrityError:
-            await self._s.rollback()
             result = await self._s.execute(
                 select(Person.id).where(Person.canonical_name == canonical_name)
             )
@@ -118,9 +119,11 @@ class GraphRepository:
         )
         if existing.scalar_one_or_none():
             return
-        self._s.add(Alias(id=_uuid(), surface_form=surface_form, person_id=person_id))
         try:
-            await self._s.flush()
+            # SAVEPOINT: if the surface form was inserted concurrently, undo
+            # just this insert and leave the outer transaction usable.
+            async with self._s.begin_nested():
+                self._s.add(Alias(id=_uuid(), surface_form=surface_form, person_id=person_id))
         except IntegrityError:
             pass  # inserted concurrently — fine
 
