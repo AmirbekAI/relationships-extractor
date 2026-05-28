@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from app.core.models import ExtractionResult, ExtractedPerson, ExtractedRelationship
 from app.crawlers.base import ArticleContent
 from app.extractors.base import BaseLLMClient
+from app.extractors.filters import filter_extraction
 
 logger = logging.getLogger(__name__)
 
@@ -62,18 +63,41 @@ class _AliasResolution(BaseModel):
 
 _EXTRACTION_SYSTEM = """\
 You are an expert at extracting structured information from news article excerpts.
-Identify all people mentioned and the relationships between them.
+Identify all PEOPLE mentioned and the relationships between them.
 
-Rules:
+PEOPLE rules:
+- Only real human individuals. NEVER list a company, organization, product,
+  government body, agency, or any non-human entity as a person.
+  Examples of what NOT to extract as a person:
+    "OpenAI", "Microsoft", "Anthropic", "Google", "Amazon",
+    "the board", "the company", "TechCrunch", "the Federal Reserve",
+    "ChatGPT", "GPT-4"
 - Use full canonical names (e.g. "Sam Altman", not "Altman" or "OpenAI's CEO").
 - Include the article author as a person with role "journalist".
+- If the same person appears under different surface forms use one canonical entry.
+
+RELATIONSHIP rules:
 - For the author add a relationship: author —reports on→ each main subject
   with relation_type "reports on".
 - Only include relationships clearly stated or strongly implied — do not invent.
+- When the text attributes an action to an organization (e.g. "OpenAI sued Musk",
+  "Microsoft invested in OpenAI", "Anthropic partnered with Amazon"):
+    * If the article names a human responsible for the org's action ANYWHERE
+      in the text (CEO, founder, named actor), you MUST emit the relationship
+      between the corresponding humans. Do NOT skip the edge.
+      Examples (assume the article also names Altman as OpenAI's CEO and
+      Nadella as Microsoft's CEO):
+        "OpenAI and Microsoft announced a partnership"
+            → Sam Altman —partners with→ Satya Nadella
+        "Microsoft invested in OpenAI"
+            → Satya Nadella —invests in→ Sam Altman
+        "Elon Musk sued OpenAI and CEO Sam Altman"
+            → Elon Musk —sues→ Sam Altman
+    * Only if NO responsible human is named anywhere in the article should
+      you omit the relationship.
 - Relation types must be short verb phrases: "criticizes", "partners with",
   "invests in", "sues", "leads", "co-founded", "reports on", etc.
 - Each relationship must have a verbatim supporting quote from the text.
-- If the same person appears under different surface forms use one canonical entry.
 - If no people or relationships are present in this excerpt return empty lists.
 """
 
@@ -186,6 +210,11 @@ class LLMExtractor:
             return ExtractionResult(article_url=article.url, error="All chunks failed extraction")
 
         people, rels = _merge(chunk_results)
+
+        # Belt-and-suspenders: even with the tightened prompt, the LLM can
+        # still slip an org into the people list. Drop them and any edge
+        # they touch before they reach the graph.
+        people, rels, _ = filter_extraction(people, rels)
 
         logger.info(
             "Merged: %d people, %d relationships from %s",

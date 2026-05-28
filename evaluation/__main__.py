@@ -44,11 +44,13 @@ def _build_extractor() -> LLMExtractor:
     return LLMExtractor(client=client, default_sentences_per_chunk=s.sentences_per_chunk)
 
 
-async def _run(only: str | None) -> int:
+async def _run(only: str | None, show_diff: bool) -> int:
     extractor = _build_extractor()
 
     if only in (None, "extractor"):
-        per_article, p, es, ef = await evaluate_extractor(extractor)
+        per_article, p, es, ef = await evaluate_extractor(
+            extractor, capture_diff=show_diff,
+        )
         print(render_extractor_report(per_article, p, es, ef))
 
     if only in (None, "resolver"):
@@ -74,6 +76,12 @@ def main() -> int:
         action="store_true",
         help="Print extractor + resolver debug logs as the eval runs.",
     )
+    parser.add_argument(
+        "--show-diff",
+        action="store_true",
+        help="Per-article: print matched / missed / extra edges so you can "
+             "see exactly what the model got right and wrong.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -81,7 +89,7 @@ def main() -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
-    return asyncio.run(_run(args.only))
+    return asyncio.run(_run(args.only, args.show_diff))
 
 
 if __name__ == "__main__":

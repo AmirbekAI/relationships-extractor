@@ -30,6 +30,20 @@
     ]
   },
   {
+    "id": "org-actions",
+    "comment": "Tests org filtering: corporate-subject sentences where some have named humans responsible and some don't. OpenAI / Microsoft / Google / Anthropic must NEVER appear in people. The Pichai→Anthropic edge must be DROPPED (no Anthropic leader named).",
+    "url": "https://techcrunch.com/2024/06/01/openai-microsoft-extend/",
+    "title": "OpenAI and Microsoft Extend Their Partnership",
+    "author": "Pat Lee",
+    "body_text": "OpenAI and Microsoft announced an expanded partnership today, with Microsoft committing additional capital to fund OpenAI's next training run. Sam Altman, OpenAI's CEO, said the deal will give the company more compute. Satya Nadella, Microsoft's CEO, framed the extension as a long-term commitment to enterprise AI. Google, conspicuously absent from the talks, has been investing in Anthropic instead. Sundar Pichai, who leads Google, has not commented publicly.",
+    "people": ["Sam Altman", "Satya Nadella", "Sundar Pichai", "Pat Lee"],
+    "relationships": [
+      { "source": "Sam Altman",    "target": "Satya Nadella","type_keywords": ["partner", "extend", "collaborat", "deal"], "note": "partnership is symmetric — either direction acceptable; gold uses the LLM's preferred ordering" },
+      { "source": "Satya Nadella", "target": "Sam Altman",  "type_keywords": ["invest", "fund", "commit capital"] },
+      { "source": "Pat Lee",       "target": "Sam Altman",  "type_keywords": ["reports on", "covers", "writes about"] }
+    ]
+  },
+  {
     "id": "funding-round",
     "comment": "Tests: investor/founder vocabulary, distinguishing 'invests in' from 'leads'.",
     "url": "https://techcrunch.com/2024/05/10/anthropic-raises/",
@@ -40,7 +54,7 @@
     "relationships": [
       { "source": "Andy Jassy",      "target": "Dario Amodei",  "type_keywords": ["invest", "fund", "back"] },
       { "source": "Dario Amodei",    "target": "Daniela Amodei","type_keywords": ["co-found", "founded", "cofound"] },
-      { "source": "Sam Altman",      "target": "Dario Amodei",  "type_keywords": ["managed", "led", "employed", "worked with"] },
+      { "source": "Dario Amodei",    "target": "Sam Altman",    "type_keywords": ["worked under", "worked at", "previously"], "note": "article literally says 'Dario Amodei previously worked at OpenAI under Sam Altman' — direction follows the article's framing" },
       { "source": "Alex Chen",       "target": "Dario Amodei",  "type_keywords": ["reports on", "covers", "writes about"] }
     ]
   }
