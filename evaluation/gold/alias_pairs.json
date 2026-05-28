@@ -7,7 +7,9 @@
     { "canonical_name": "Satya Nadella",  "seed_aliases": ["Satya Nadella"] },
     { "canonical_name": "Greg Brockman",  "seed_aliases": ["Greg Brockman"] },
     { "canonical_name": "Dario Amodei",   "seed_aliases": ["Dario Amodei"] },
-    { "canonical_name": "Andy Jassy",     "seed_aliases": ["Andy Jassy"] }
+    { "canonical_name": "Andy Jassy",     "seed_aliases": ["Andy Jassy"] },
+    { "canonical_name": "Anthony Ha",     "seed_aliases": ["Anthony Ha"] },
+    { "canonical_name": "Anthony Garcia", "seed_aliases": ["Anthony Garcia"] }
   ],
 
   "pairs": [
@@ -26,11 +28,14 @@
     { "surface": "Elon Mosk",         "expected": "Elon Musk",      "expected_stage": "levenshtein",
       "comment": "single-char vowel swap." },
 
-    { "surface": "Altman",            "expected": "Sam Altman",     "expected_stage": "llm",
-      "comment": "last-name only — too short for Levenshtein, falls through to LLM fallback." },
+    { "surface": "Altman",            "expected": "Sam Altman",     "expected_stage": "subname",
+      "comment": "last-name only, unique match in DB — auto-accept deterministically (no LLM)." },
 
-    { "surface": "Satya",             "expected": "Satya Nadella",  "expected_stage": "llm",
-      "comment": "first-name only." },
+    { "surface": "Satya",             "expected": "Satya Nadella",  "expected_stage": "subname",
+      "comment": "first-name only, unique match — auto-accept (no LLM)." },
+
+    { "surface": "Anthony",           "expected": null,             "expected_stage": "none",
+      "comment": "first-name AMBIGUOUS — both Anthony Ha and Anthony Garcia match by subname rule. Resolver refuses to guess without article context: returns null and lets a fresh 'Anthony' Person be created (recoverable via later dedupe), rather than silently picking the wrong canonical." },
 
     { "surface": "Vladimir Putin",    "expected": null,             "expected_stage": "none",
       "comment": "totally unrelated — must return None (treated as new person)." },

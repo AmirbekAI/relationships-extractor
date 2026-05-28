@@ -99,6 +99,30 @@ def _shares_long_token(a: str, b: str, min_len: int = _TOKEN_OVERLAP_MIN_LEN) ->
     return bool(a_tokens & b_tokens)
 
 
+def _is_subname_of(surface_norm: str, alias_norm: str, min_len: int = _TOKEN_OVERLAP_MIN_LEN) -> bool:
+    """
+    True iff every long (>= min_len) token of *surface_norm* also appears as
+    a whitespace token of *alias_norm*. Captures the "first name only" /
+    "last name only" / "title + last name" abbreviations of a canonical
+    name *without* spending an LLM call.
+
+    Examples that return True:
+        ("anthony",     "anthony ha")     — first name only
+        ("altman",      "sam altman")     — last name only
+        ("satya",       "satya nadella")  — first name only
+        ("ceo altman",  "sam altman")     — title dropped by short-token filter
+
+    Examples that return False:
+        ("anthony garcia", "anthony ha")  — surface has token not in alias
+        ("sam",            "sam altman")  — surface has no token >= min_len
+        ("",               "x")           — no usable tokens
+    """
+    surface_long = {t for t in surface_norm.split() if len(t) >= min_len}
+    if not surface_long:
+        return False
+    return surface_long.issubset(set(alias_norm.split()))
+
+
 # ── main entry point ──────────────────────────────────────────────────────────
 
 async def resolve_person(
@@ -135,6 +159,10 @@ async def resolve_person(
     best_sim = 0.0
     best_match: Optional[tuple[str, str]] = None  # (person_id, canonical_name)
     llm_candidates: list[str] = []
+    # person_id → canonical_name for every alias where the surface's long
+    # tokens are a subset of the alias's tokens. Deduped by person_id so
+    # multiple alias rows for the same person count as one match.
+    subname_matches: dict[str, str] = {}
 
     for surface_form, person_id, canonical_name in all_aliases:
         sim = _similarity(norm, surface_form)
@@ -142,8 +170,11 @@ async def resolve_person(
             if sim > best_sim:
                 best_sim = sim
                 best_match = (person_id, canonical_name)
-        elif sim >= _LLM_CANDIDATE_MIN or _shares_long_token(norm, surface_form):
-            llm_candidates.append(canonical_name)
+        else:
+            if _is_subname_of(norm, surface_form):
+                subname_matches[person_id] = canonical_name
+            if sim >= _LLM_CANDIDATE_MIN or _shares_long_token(norm, surface_form):
+                llm_candidates.append(canonical_name)
 
     if best_match:
         logger.debug(
@@ -152,6 +183,30 @@ async def resolve_person(
         )
         await repo.add_alias(best_match[0], norm)
         return best_match
+
+    # ── 2.5 unique sub-name (e.g. first-name-only) → no LLM needed ────────────
+    # If the surface form is a strict abbreviation of exactly one canonical
+    # name in the DB, accept it deterministically — no LLM round-trip.
+    if len(subname_matches) == 1:
+        person_id, canonical_name = next(iter(subname_matches.items()))
+        logger.debug(
+            "resolve '%s' → subname hit '%s' (unique long-token subset)",
+            raw_name, canonical_name,
+        )
+        await repo.add_alias(person_id, norm)
+        return person_id, canonical_name
+
+    # ── 2.6 ambiguous sub-name (multiple matches) → refuse, no guessing ───────
+    # The LLM disambiguator has no article context, so it would pick one of
+    # the candidates by prior alone. A wrong merge is hard to undo; a fresh
+    # Person row is easy to dedupe later when more evidence arrives.
+    if len(subname_matches) > 1:
+        logger.debug(
+            "resolve '%s' → subname ambiguous (%d candidates: %s), "
+            "treating as new person rather than guessing",
+            raw_name, len(subname_matches), list(subname_matches.values()),
+        )
+        return None
 
     # ── 3. LLM fallback ───────────────────────────────────────────────────────
     if not llm_candidates:

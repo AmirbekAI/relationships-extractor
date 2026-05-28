@@ -51,6 +51,8 @@ class _StageSniffer(logging.Handler):
     STAGE_MARKERS = [
         ("alias hit", "alias"),
         ("levenshtein hit", "levenshtein"),
+        ("subname hit", "subname"),
+        ("subname ambiguous", "none"),     # multiple subname matches → refuse
         ("LLM hit", "llm"),
         ("LLM returned no match", "llm"),
         ("no candidates", "none"),
