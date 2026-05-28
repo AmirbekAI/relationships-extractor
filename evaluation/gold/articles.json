@@ -1,0 +1,47 @@
+[
+  {
+    "id": "altman-returns",
+    "comment": "Tests: multi-subject extraction, journalist edge, clear distinct relation types (criticize/support/resign).",
+    "url": "https://techcrunch.com/2024/01/15/sam-altman-returns/",
+    "title": "Sam Altman Returns to OpenAI as CEO",
+    "author": "Jane Doe",
+    "body_text": "Sam Altman has returned to OpenAI as CEO after a brief but dramatic firing by the board. Elon Musk, an early investor and co-founder of OpenAI, publicly criticized the board's decision to remove Altman. Satya Nadella, the CEO of Microsoft, expressed strong support for Altman and offered him a senior role at Microsoft. Greg Brockman, OpenAI's president, resigned in solidarity with Altman shortly after the firing. Altman and Brockman were later reinstated following significant pressure from OpenAI employees and investors.",
+    "people": ["Sam Altman", "Elon Musk", "Satya Nadella", "Greg Brockman", "Jane Doe"],
+    "relationships": [
+      { "source": "Elon Musk",     "target": "Sam Altman",   "type_keywords": ["criticize", "criticise"] },
+      { "source": "Satya Nadella", "target": "Sam Altman",   "type_keywords": ["support", "back"] },
+      { "source": "Greg Brockman", "target": "Sam Altman",   "type_keywords": ["resign", "solidarity"] },
+      { "source": "Jane Doe",      "target": "Sam Altman",   "type_keywords": ["reports on", "covers", "writes about"] }
+    ]
+  },
+  {
+    "id": "musk-suit",
+    "comment": "Tests: surface-form variation (last-name-only Musk/Altman), legal relation vocabulary.",
+    "url": "https://techcrunch.com/2024/03/01/musk-sues-openai/",
+    "title": "Musk Sues OpenAI and Altman Over Mission Drift",
+    "author": "Mary Smith",
+    "body_text": "Elon Musk has filed a lawsuit against OpenAI and its CEO Sam Altman, accusing the company of abandoning its founding non-profit mission. Musk co-founded OpenAI alongside Altman in 2015 but departed from the board in 2018. The complaint alleges that Altman partnered with Microsoft in a way that betrayed the original charter. Microsoft CEO Satya Nadella has not publicly responded to the suit.",
+    "people": ["Elon Musk", "Sam Altman", "Satya Nadella", "Mary Smith"],
+    "relationships": [
+      { "source": "Elon Musk",     "target": "Sam Altman",   "type_keywords": ["sue", "lawsuit", "litigat"] },
+      { "source": "Elon Musk",     "target": "Sam Altman",   "type_keywords": ["co-found", "founded", "cofound"] },
+      { "source": "Sam Altman",    "target": "Satya Nadella","type_keywords": ["partner", "deal with"] },
+      { "source": "Mary Smith",    "target": "Elon Musk",    "type_keywords": ["reports on", "covers", "writes about"] }
+    ]
+  },
+  {
+    "id": "funding-round",
+    "comment": "Tests: investor/founder vocabulary, distinguishing 'invests in' from 'leads'.",
+    "url": "https://techcrunch.com/2024/05/10/anthropic-raises/",
+    "title": "Anthropic Raises $4B with Amazon as Lead Investor",
+    "author": "Alex Chen",
+    "body_text": "Anthropic, the AI safety company co-founded by Dario Amodei and Daniela Amodei, has closed a $4 billion funding round led by Amazon. Andy Jassy, Amazon's CEO, said the investment reflects the company's commitment to generative AI. Dario Amodei previously worked at OpenAI under Sam Altman before founding Anthropic. The round positions Anthropic as a direct competitor to OpenAI in the foundation model market.",
+    "people": ["Dario Amodei", "Daniela Amodei", "Andy Jassy", "Sam Altman", "Alex Chen"],
+    "relationships": [
+      { "source": "Andy Jassy",      "target": "Dario Amodei",  "type_keywords": ["invest", "fund", "back"] },
+      { "source": "Dario Amodei",    "target": "Daniela Amodei","type_keywords": ["co-found", "founded", "cofound"] },
+      { "source": "Sam Altman",      "target": "Dario Amodei",  "type_keywords": ["managed", "led", "employed", "worked with"] },
+      { "source": "Alex Chen",       "target": "Dario Amodei",  "type_keywords": ["reports on", "covers", "writes about"] }
+    ]
+  }
+]

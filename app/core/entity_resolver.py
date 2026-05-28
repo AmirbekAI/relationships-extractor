@@ -85,6 +85,18 @@ def _similarity(a: str, b: str) -> float:
 _LEVENSHTEIN_ACCEPT: float = 0.80
 # Pass to LLM as a candidate above this (but below accept threshold)
 _LLM_CANDIDATE_MIN: float = 0.50
+# Also pass to LLM if surface and alias share a token of at least this length.
+# Catches "Satya" → "Satya Nadella" and "Altman" → "Sam Altman" — short
+# surface forms that fail the similarity floor for length reasons alone.
+# 4 chars is the floor so we don't flood the LLM with first-name collisions.
+_TOKEN_OVERLAP_MIN_LEN: int = 4
+
+
+def _shares_long_token(a: str, b: str, min_len: int = _TOKEN_OVERLAP_MIN_LEN) -> bool:
+    """True iff *a* and *b* share at least one whitespace token of length >= min_len."""
+    a_tokens = {t for t in a.split() if len(t) >= min_len}
+    b_tokens = {t for t in b.split() if len(t) >= min_len}
+    return bool(a_tokens & b_tokens)
 
 
 # ── main entry point ──────────────────────────────────────────────────────────
@@ -130,7 +142,7 @@ async def resolve_person(
             if sim > best_sim:
                 best_sim = sim
                 best_match = (person_id, canonical_name)
-        elif sim >= _LLM_CANDIDATE_MIN:
+        elif sim >= _LLM_CANDIDATE_MIN or _shares_long_token(norm, surface_form):
             llm_candidates.append(canonical_name)
 
     if best_match:

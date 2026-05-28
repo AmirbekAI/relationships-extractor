@@ -1,0 +1,41 @@
+{
+  "comment": "Each pair: (surface_form_seen_in_text -> canonical_name). The eval seeds the DB with the canonical names + their initial aliases, then asks the resolver to resolve each surface_form. We measure: did it return the right canonical name? Which resolver stage fired?",
+
+  "canonical_seed": [
+    { "canonical_name": "Sam Altman",     "seed_aliases": ["Sam Altman"] },
+    { "canonical_name": "Elon Musk",      "seed_aliases": ["Elon Musk"] },
+    { "canonical_name": "Satya Nadella",  "seed_aliases": ["Satya Nadella"] },
+    { "canonical_name": "Greg Brockman",  "seed_aliases": ["Greg Brockman"] },
+    { "canonical_name": "Dario Amodei",   "seed_aliases": ["Dario Amodei"] },
+    { "canonical_name": "Andy Jassy",     "seed_aliases": ["Andy Jassy"] }
+  ],
+
+  "pairs": [
+    { "surface": "Sam Altman",        "expected": "Sam Altman",     "expected_stage": "alias",
+      "comment": "trivial exact match — should hit the alias table." },
+
+    { "surface": "Dr. Sam Altman",    "expected": "Sam Altman",     "expected_stage": "alias",
+      "comment": "title + same name — normalize() strips honorifics." },
+
+    { "surface": "Sam  Altman",       "expected": "Sam Altman",     "expected_stage": "alias",
+      "comment": "whitespace noise — normalize() collapses." },
+
+    { "surface": "Sam Altmann",       "expected": "Sam Altman",     "expected_stage": "levenshtein",
+      "comment": "single-char typo — within 0.80 similarity." },
+
+    { "surface": "Elon Mosk",         "expected": "Elon Musk",      "expected_stage": "levenshtein",
+      "comment": "single-char vowel swap." },
+
+    { "surface": "Altman",            "expected": "Sam Altman",     "expected_stage": "llm",
+      "comment": "last-name only — too short for Levenshtein, falls through to LLM fallback." },
+
+    { "surface": "Satya",             "expected": "Satya Nadella",  "expected_stage": "llm",
+      "comment": "first-name only." },
+
+    { "surface": "Vladimir Putin",    "expected": null,             "expected_stage": "none",
+      "comment": "totally unrelated — must return None (treated as new person)." },
+
+    { "surface": "Bill Gates",        "expected": null,             "expected_stage": "none",
+      "comment": "known person but not in the graph — must NOT be merged into anyone." }
+  ]
+}
