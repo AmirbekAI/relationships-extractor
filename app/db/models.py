@@ -93,7 +93,7 @@ class Relationship(Base):
 
     source_person = relationship("Person", foreign_keys=[source_person_id], back_populates="outgoing")
     target_person = relationship("Person", foreign_keys=[target_person_id], back_populates="incoming")
-    provenance = relationship("Provenance", back_populates="relationship", cascade="all, delete-orphan")
+    provenance = relationship("Provenance", back_populates="rel", cascade="all, delete-orphan")
 
 
 class Provenance(Base):
@@ -107,5 +107,5 @@ class Provenance(Base):
     article_id = Column(String, ForeignKey("articles.id", ondelete="CASCADE"), nullable=False)
     quote = Column(Text, nullable=True)
 
-    relationship = relationship("Relationship", back_populates="provenance")
+    rel = relationship("Relationship", back_populates="provenance")
     article = relationship("Article", back_populates="provenance")
