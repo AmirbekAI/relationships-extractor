@@ -24,9 +24,10 @@ import math
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db.models import (
     Alias,
@@ -69,29 +70,52 @@ class GraphRepository:
         return person_id
 
     async def get_person(self, person_id: str) -> Person | None:
-        result = await self._s.execute(select(Person).where(Person.id == person_id))
+        """Fetch a person with aliases eager-loaded (safe to use post-session)."""
+        result = await self._s.execute(
+            select(Person)
+            .options(selectinload(Person.aliases))
+            .where(Person.id == person_id)
+        )
         return result.scalar_one_or_none()
 
     async def list_people(self, page: int, page_size: int) -> tuple[list[Person], int]:
-        count_result = await self._s.execute(select(Person.id))
-        total = len(count_result.all())
+        """Paginated list of Person rows (aliases eager-loaded) + total count."""
+        total = await self._s.scalar(select(func.count()).select_from(Person)) or 0
 
         result = await self._s.execute(
             select(Person)
+            .options(selectinload(Person.aliases))
             .order_by(Person.canonical_name)
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
-        return result.scalars().all(), total
+        return list(result.scalars().all()), total
+
+    async def count_people(self) -> int:
+        return await self._s.scalar(select(func.count()).select_from(Person)) or 0
 
     async def get_person_relationships(self, person_id: str) -> list[Relationship]:
+        """
+        All relationships touching *person_id*, with both endpoint Persons and
+        each Provenance.article eager-loaded so the route can build full DTOs
+        after the session closes.
+        """
         result = await self._s.execute(
-            select(Relationship).where(
+            select(Relationship)
+            .options(
+                selectinload(Relationship.source_person),
+                selectinload(Relationship.target_person),
+                selectinload(Relationship.provenance).selectinload(Provenance.article),
+            )
+            .where(
                 (Relationship.source_person_id == person_id)
                 | (Relationship.target_person_id == person_id)
             )
         )
-        return result.scalars().all()
+        return list(result.scalars().all())
+
+    async def count_relationships(self) -> int:
+        return await self._s.scalar(select(func.count()).select_from(Relationship)) or 0
 
     # ──────────────────────────────────────────────────────────────── Aliases
 
@@ -139,6 +163,11 @@ class GraphRepository:
         return result.all()
 
     # ──────────────────────────────────────────────────────────────── Articles
+
+    async def get_article_by_url(self, url: str) -> Article | None:
+        """Return the Article row for *url*, or None."""
+        result = await self._s.execute(select(Article).where(Article.url == url))
+        return result.scalar_one_or_none()
 
     async def upsert_article(
         self,

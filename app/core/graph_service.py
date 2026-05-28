@@ -79,6 +79,22 @@ class GraphService:
         if crawler is None:
             raise ValueError(f"No crawler registered for URL: {url}")
 
+        # ── 1b. fast-path: skip already-processed URLs ────────────────────────
+        # Avoids re-running the LLM on every re-scan; the API surfaces this
+        # as status="already_exists".
+        async with get_session() as session:
+            existing = await GraphRepository(session).get_article_by_url(url)
+        if existing is not None:
+            return {
+                "article_url": url,
+                "article_id": existing.id,
+                "title": existing.title,
+                "people_resolved": 0,
+                "relationships_stored": 0,
+                "extraction_error": None,
+                "status": "already_exists",
+            }
+
         # ── 2. crawl ──────────────────────────────────────────────────────────
         article = await crawler.fetch_article(url)
         if article is None:
@@ -131,9 +147,11 @@ class GraphService:
         return {
             "article_url": url,
             "article_id": article_id,
+            "title": article.title,
             "people_resolved": len(name_to_id),
             "relationships_stored": rel_count,
             "extraction_error": result.error,
+            "status": "processed",
         }
 
     async def _resolve_or_create(
@@ -175,7 +193,8 @@ class GraphService:
         if source_ids:
             crawlers = [c for c in crawlers if c.source_id in source_ids]
 
-        total_articles = 0
+        total_processed = 0
+        total_skipped = 0
         total_relationships = 0
         errors: list[str] = []
 
@@ -192,7 +211,10 @@ class GraphService:
                 for url in urls:
                     try:
                         summary = await self.process_article(url, sentences_per_chunk)
-                        total_articles += 1
+                        if summary.get("status") == "already_exists":
+                            total_skipped += 1
+                            continue
+                        total_processed += 1
                         total_relationships += summary["relationships_stored"]
                         logger.info(
                             "Processed %s: %d people, %d relationships",
@@ -206,10 +228,25 @@ class GraphService:
                         errors.append(msg)
 
         return {
-            "articles_processed": total_articles,
+            "pages_crawled": pages,
+            "articles_processed": total_processed,
+            "articles_skipped": total_skipped,
             "relationships_stored": total_relationships,
             "errors": errors,
         }
+
+    # ──────────────────────────────────────────────────────────────── helpers
+
+    async def get_counts(self) -> tuple[int, int]:
+        """Return (people_count, relationship_count) for the whole graph."""
+        async with get_session() as session:
+            repo = GraphRepository(session)
+            return await repo.count_people(), await repo.count_relationships()
+
+    async def get_article_by_url(self, url: str):
+        """Return the Article row for *url*, or None."""
+        async with get_session() as session:
+            return await GraphRepository(session).get_article_by_url(url)
 
     # ──────────────────────────────────────────────────────────── read
 
@@ -248,16 +285,12 @@ class GraphService:
             if person is None:
                 return None
 
+            # Relationships come with both endpoints + provenance.article
+            # eager-loaded by the repo, so the route can build DTOs after
+            # the session closes without triggering lazy-load errors.
             relationships = await repo.get_person_relationships(person_id)
-            rels_with_prov = []
-            for rel in relationships:
-                prov = await repo.get_provenance_for_relationship(rel.id)
-                rels_with_prov.append({
-                    "relationship": rel,
-                    "provenance": prov,
-                })
 
             return {
                 "person": person,
-                "relationships": rels_with_prov,
+                "relationships": relationships,
             }
