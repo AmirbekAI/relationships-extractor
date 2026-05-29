@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
@@ -63,7 +63,7 @@ class _FakeCrawler(BaseCrawler):
             url=url,
             title="Test article",
             author="Jane Doe",
-            published_at=datetime.utcnow(),
+            published_at=datetime.now(timezone.utc),
             body_text=self._body,
             source=self.source_id,
         )

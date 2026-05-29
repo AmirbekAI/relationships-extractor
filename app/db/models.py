@@ -13,7 +13,7 @@ Provenance  links a Relationship to the Article + quote that justifies it
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -21,6 +21,11 @@ from sqlalchemy.orm import DeclarativeBase, relationship
 
 def _uuid() -> str:
     return str(uuid.uuid4())
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC timestamp; replaces deprecated datetime.utcnow."""
+    return datetime.now(timezone.utc)
 
 
 class Base(DeclarativeBase):
@@ -33,8 +38,8 @@ class Person(Base):
     id = Column(String, primary_key=True, default=_uuid)
     canonical_name = Column(String, nullable=False, unique=True, index=True)
     bio = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     aliases = relationship("Alias", back_populates="person", cascade="all, delete-orphan")
     outgoing = relationship(
@@ -68,10 +73,10 @@ class Article(Base):
     id = Column(String, primary_key=True, default=_uuid)
     url = Column(String, unique=True, nullable=False, index=True)
     title = Column(String, nullable=True)
-    published_at = Column(DateTime, nullable=True)
+    published_at = Column(DateTime(timezone=True), nullable=True)
     author = Column(String, nullable=True)
     source = Column(String, nullable=True)          # e.g. "techcrunch"
-    processed_at = Column(DateTime, default=datetime.utcnow)
+    processed_at = Column(DateTime(timezone=True), default=_utcnow)
 
     # ── crash-recovery checkpoint ────────────────────────────────────────
     # body_hash:           SHA-256 of body_text at chunking time. Used to
@@ -104,8 +109,8 @@ class Relationship(Base):
     target_person_id = Column(String, ForeignKey("people.id", ondelete="CASCADE"), nullable=False, index=True)
     relation_type = Column(String, nullable=False)
     explanation = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     source_person = relationship("Person", foreign_keys=[source_person_id], back_populates="outgoing")
     target_person = relationship("Person", foreign_keys=[target_person_id], back_populates="incoming")

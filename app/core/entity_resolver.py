@@ -16,13 +16,28 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
-from typing import TYPE_CHECKING, Optional
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal, Optional
 
 if TYPE_CHECKING:
     from app.db.repository import GraphRepository
     from app.extractors.llm_extractor import LLMExtractor
 
 logger = logging.getLogger(__name__)
+
+
+# Which tier of the pipeline actually produced the answer. Returned from
+# resolve_person so callers (the eval, future telemetry) don't have to sniff
+# log strings. "none" covers every refuse-or-give-up path.
+Stage = Literal["alias", "levenshtein", "subname", "llm", "none"]
+
+
+@dataclass(frozen=True)
+class ResolveResult:
+    """What resolve_person decided, and which tier made the call."""
+    person_id: str
+    canonical_name: str
+    stage: Stage
 
 # ── normalisation ─────────────────────────────────────────────────────────────
 _TITLES = re.compile(
@@ -179,9 +194,9 @@ async def resolve_person(
     *,
     recency: Optional[dict[str, str]] = None,
     use_llm_fallback: bool = True,
-) -> Optional[tuple[str, str]]:
+) -> Optional[ResolveResult]:
     """
-    Resolve *raw_name* → *(person_id, canonical_name)* or ``None``.
+    Resolve *raw_name* → :class:`ResolveResult` or ``None``.
 
     Side-effect: on a Levenshtein / sub-name / LLM match the normalised surface
     form is written to the aliases table so future lookups are O(1).
@@ -210,7 +225,7 @@ async def resolve_person(
     hit = await repo.find_person_by_alias(norm)
     if hit:
         logger.debug("resolve '%s' → alias hit '%s'", raw_name, hit[1])
-        return hit
+        return ResolveResult(person_id=hit[0], canonical_name=hit[1], stage="alias")
 
     # ── 2. Levenshtein distance over all known aliases ────────────────────────
     # rows: (surface_form, person_id, canonical_name)
@@ -242,7 +257,9 @@ async def resolve_person(
             raw_name, best_match[1], best_sim,
         )
         await repo.add_alias(best_match[0], norm)
-        return best_match
+        return ResolveResult(
+            person_id=best_match[0], canonical_name=best_match[1], stage="levenshtein",
+        )
 
     # ── 2.5 unique sub-name (e.g. first-name-only) → no LLM needed ────────────
     # If the surface form is a strict abbreviation of exactly one canonical
@@ -254,7 +271,9 @@ async def resolve_person(
             raw_name, canonical_name,
         )
         await repo.add_alias(person_id, norm)
-        return person_id, canonical_name
+        return ResolveResult(
+            person_id=person_id, canonical_name=canonical_name, stage="subname",
+        )
 
     # ── 2.6 ambiguous sub-name (multiple matches) ─────────────────────────────
     # Try article-recency first (opt-in via the `recency` kwarg). For each
@@ -278,7 +297,9 @@ async def resolve_person(
                     raw_name, canonical_name,
                 )
                 await repo.add_alias(person_id, norm)
-                return person_id, canonical_name
+                return ResolveResult(
+                    person_id=person_id, canonical_name=canonical_name, stage="subname",
+                )
 
         # Either recency wasn't enabled, or it didn't disambiguate.
         # Refuse rather than letting the LLM guess without article context.
@@ -321,6 +342,8 @@ async def resolve_person(
         if canonical_name == matched_name:
             logger.debug("resolve '%s' → LLM hit '%s'", raw_name, canonical_name)
             await repo.add_alias(person_id, norm)
-            return person_id, canonical_name
+            return ResolveResult(
+                person_id=person_id, canonical_name=canonical_name, stage="llm",
+            )
 
     return None

@@ -154,7 +154,9 @@ def _datetime(soup: BeautifulSoup, selector: str) -> Optional[datetime]:
         return None
     raw = el.get("datetime") or el.get_text(strip=True)
     try:
-        return datetime.fromisoformat(raw.rstrip("Z"))
+        # Python <3.11 chokes on the trailing "Z"; replace with "+00:00" so
+        # the parsed value stays timezone-aware.
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except (ValueError, AttributeError):
         return None
 

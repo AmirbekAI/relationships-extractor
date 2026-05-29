@@ -24,7 +24,7 @@ import math
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -123,18 +123,20 @@ class GraphRepository:
         """
         Look up a normalised surface form in the aliases table.
         Returns (person_id, canonical_name) or None.
+
+        Single join — does NOT eager-load Person.aliases (the resolver only
+        needs the canonical name, and the caller is reading two fields off
+        the result, not the full Person row).
         """
         result = await self._s.execute(
-            select(Alias.person_id)
+            select(Alias.person_id, Person.canonical_name)
+            .join(Person, Person.id == Alias.person_id)
             .where(Alias.surface_form == surface_form)
         )
-        person_id = result.scalar_one_or_none()
-        if not person_id:
+        row = result.first()
+        if row is None:
             return None
-        person = await self.get_person(person_id)
-        if not person:
-            return None
-        return person_id, person.canonical_name
+        return row[0], row[1]
 
     async def add_alias(self, person_id: str, surface_form: str) -> None:
         """Insert alias; silently ignore if the surface form already exists."""
@@ -234,7 +236,6 @@ class GraphRepository:
         """
         # Provenance referencing this article (CASCADE wipes them via FK if we
         # delete the article, but here we're not deleting — we're rewinding).
-        from sqlalchemy import delete
         await self._s.execute(
             delete(Provenance).where(Provenance.article_id == article_id)
         )

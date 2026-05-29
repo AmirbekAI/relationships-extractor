@@ -6,10 +6,8 @@ gold/alias_pairs.json (one Person row + one Alias row each), then for every
 (surface, expected_canonical, expected_stage) pair:
 
   • calls resolve_person(surface, repo, extractor)
-  • captures which pipeline stage actually fired
-    (alias / levenshtein / llm / none) by sniffing the resolver's own
-    debug logs — keeps this eval in sync with the resolver without
-    modifying it.
+  • reads .stage off the returned ResolveResult (or "none" when the
+    resolver gave up).
   • compares resolved canonical_name + stage to the gold expectation.
 
 Reports overall accuracy and a per-stage confusion summary.
@@ -33,46 +31,6 @@ from app.extractors.llm_extractor import LLMExtractor
 logger = logging.getLogger(__name__)
 
 GOLD_PATH = Path(__file__).parent / "gold" / "alias_pairs.json"
-
-
-# ── stage detection via log sniffing ─────────────────────────────────────────
-
-class _StageSniffer(logging.Handler):
-    """
-    Listens on the app.core.entity_resolver logger and infers which stage
-    fired from the log line text. resolver.py emits one of:
-        "→ alias hit '...'"
-        "→ levenshtein hit '...' (sim=...)"
-        "→ LLM hit '...'"
-        "→ LLM returned no match"
-        "→ no candidates, treating as new person"
-    """
-
-    STAGE_MARKERS = [
-        ("alias hit", "alias"),
-        ("levenshtein hit", "levenshtein"),
-        ("subname hit", "subname"),
-        ("subname recency hit", "subname"),  # ambiguous, disambiguated by recency
-        ("subname ambiguous", "none"),       # ambiguous + no recency → refuse
-        ("LLM hit", "llm"),
-        ("LLM returned no match", "llm"),
-        ("LLM fallback disabled", "none"),   # cost mode: skip LLM, treat as new
-        ("no candidates", "none"),
-    ]
-
-    def __init__(self) -> None:
-        super().__init__(level=logging.DEBUG)
-        self.last_stage: Optional[str] = None
-
-    def emit(self, record: logging.LogRecord) -> None:
-        msg = record.getMessage()
-        for marker, stage in self.STAGE_MARKERS:
-            if marker in msg:
-                self.last_stage = stage
-                return
-
-    def reset(self) -> None:
-        self.last_stage = None
 
 
 # ── eval ─────────────────────────────────────────────────────────────────────
@@ -117,32 +75,19 @@ async def evaluate_resolver(extractor: LLMExtractor) -> list[PairResult]:
     gold = _load_gold()
     await _seed_db(gold)
 
-    # Wire up the stage sniffer on the resolver's logger.
-    resolver_logger = logging.getLogger("app.core.entity_resolver")
-    old_level = resolver_logger.level
-    resolver_logger.setLevel(logging.DEBUG)
-    sniffer = _StageSniffer()
-    resolver_logger.addHandler(sniffer)
-
     results: list[PairResult] = []
-    try:
-        for pair in gold["pairs"]:
-            sniffer.reset()
-            async with get_session() as session:
-                repo = GraphRepository(session)
-                resolved = await resolve_person(pair["surface"], repo, extractor)
+    for pair in gold["pairs"]:
+        async with get_session() as session:
+            repo = GraphRepository(session)
+            resolved = await resolve_person(pair["surface"], repo, extractor)
 
-            got_name = resolved[1] if resolved else None
-            results.append(PairResult(
-                surface=pair["surface"],
-                expected=pair["expected"],
-                expected_stage=pair["expected_stage"],
-                got=got_name,
-                got_stage=sniffer.last_stage,
-            ))
-    finally:
-        resolver_logger.removeHandler(sniffer)
-        resolver_logger.setLevel(old_level)
+        results.append(PairResult(
+            surface=pair["surface"],
+            expected=pair["expected"],
+            expected_stage=pair["expected_stage"],
+            got=resolved.canonical_name if resolved else None,
+            got_stage=resolved.stage if resolved else "none",
+        ))
 
     return results
 

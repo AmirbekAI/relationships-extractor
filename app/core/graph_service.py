@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from app.config import get_settings
@@ -35,16 +36,34 @@ from app.core.entity_resolver import (
 from app.crawlers.base import ArticleContent, CrawlerRegistry
 from app.db.repository import GraphRepository
 from app.db.session import get_session
+from app.extractors.llm_extractor import LLMExtractor
+
+logger = logging.getLogger(__name__)
 
 
 def _body_hash(text: str) -> str:
     """Stable fingerprint of the article body; used to detect mid-flight edits."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
-from app.extractors.llm_extractor import LLMExtractor
-
-logger = logging.getLogger(__name__)
 
 _DEFAULT_CHUNK_SIZE = 5
+
+
+@dataclass(frozen=True)
+class _Checkpoint:
+    """
+    Outcome of the article setup transaction in :meth:`_prepare_checkpoint`.
+
+    If *done* is True the article is already fully processed; the caller
+    returns a status="already_exists" summary without running the extractor.
+    Otherwise *start_idx* / *total_chunks* / *chunk_size* describe where the
+    per-chunk loop should resume.
+    """
+    article_id: str
+    title: Optional[str]
+    start_idx: int
+    total_chunks: int
+    chunk_size: int
+    done: bool
 
 
 class GraphService:
@@ -71,23 +90,13 @@ class GraphService:
 
         Steps
         -----
-        1. Pick a crawler, crawl the article.
-        2. Open ONE setup session/transaction:
-             - upsert the Article row (first time: seeds body_hash,
-               sentences_per_chunk, total_chunks, chunks_processed=0).
-             - if the body_hash changed since the last run → wipe this
-               article's provenance + orphan relationships and reset
-               chunks_processed to 0 (clean restart).
-             - if already complete (chunks_processed == total_chunks > 0)
-               return status="already_exists" without extracting.
-        3. For each chunk from chunks_processed to total_chunks-1, in its
-           OWN session/transaction:
-             a. Call extractor.extract_one_chunk(...) — one LLM call.
-             b. Resolve people + upsert relationships + provenance from
-                this chunk.
-             c. Bump article.chunks_processed = i+1.
-           A crash anywhere costs at most this one chunk's LLM call on
-           resume.
+        1. Pick a crawler, crawl the article (:meth:`_crawl`).
+        2. Open ONE setup transaction to decide where to start
+           (:meth:`_prepare_checkpoint`): fresh insert, resume from a stored
+           pointer, restart on body-hash mismatch, or skip if already done.
+        3. Per chunk from start_idx onward, in its OWN transaction
+           (:meth:`_process_chunk`): extract, resolve, persist, advance the
+           pointer. A crash mid-chunk costs at most that one LLM call.
 
         Raises
         ------
@@ -96,30 +105,135 @@ class GraphService:
         """
         chunk_size = sentences_per_chunk or _DEFAULT_CHUNK_SIZE
 
-        # ── 1. select crawler + crawl ─────────────────────────────────────────
-        crawler = CrawlerRegistry.for_url(url)
-        if crawler is None:
-            raise ValueError(f"No crawler registered for URL: {url}")
-
-        article = await crawler.fetch_article(url)
-        if article is None:
-            raise RuntimeError(f"Crawler returned nothing for: {url}")
-
-        # ── 2. compute chunks + open setup transaction ───────────────────────
+        article = await self._crawl(url)
         body_hash = _body_hash(article.body_text)
         chunks = self._extractor.split_chunks(article, chunk_size)
         total_chunks = len(chunks)
+
+        checkpoint = await self._prepare_checkpoint(
+            url=url,
+            article=article,
+            body_hash=body_hash,
+            chunk_size=chunk_size,
+            total_chunks=total_chunks,
+        )
+
+        if checkpoint.done:
+            return {
+                "article_url": url,
+                "article_id": checkpoint.article_id,
+                "title": checkpoint.title,
+                "people_resolved": 0,
+                "relationships_stored": 0,
+                "extraction_error": None,
+                "status": "already_exists",
+            }
+
+        # Honour the stored chunking — if it differs from the caller's request
+        # we re-split so chunk boundaries don't shift mid-article.
+        if checkpoint.chunk_size != chunk_size:
+            chunks = self._extractor.split_chunks(article, checkpoint.chunk_size)
+
+        if len(chunks) != checkpoint.total_chunks:
+            # Should be impossible given the body_hash check, but guard
+            # anyway — better to refuse than to scramble the checkpoint.
+            raise RuntimeError(
+                f"Chunk count drift for {url}: expected {checkpoint.total_chunks}, "
+                f"computed {len(chunks)}. Delete the article row and re-run."
+            )
 
         settings = get_settings()
         use_recency = settings.resolver_recency_enabled
         use_llm_fallback = settings.resolver_llm_fallback_enabled
 
+        # Per-article recency state: initialised ONCE so a person resolved in
+        # chunk 1 still disambiguates a bare reference in chunk 4. Seeded from
+        # the current alias snapshot; _resolve_or_create maintains both maps in
+        # place as new people are resolved or created mid-article. On crash +
+        # resume these start empty (cross-chunk recency lost for resumed
+        # chunks); acceptable — alias-table hits still land for anything we
+        # already wrote.
+        recency: dict[str, str] = {}
+        token_owners: dict[str, set[str]] = {}
+        if use_recency:
+            async with get_session() as session:
+                token_owners = build_token_owners(
+                    await GraphRepository(session).get_all_aliases()
+                )
+
+        people_seen: set[str] = set()
+        rels_stored = 0
+        extraction_error: Optional[str] = None
+        final_chunks_processed = checkpoint.start_idx
+
+        for i in range(checkpoint.start_idx, checkpoint.total_chunks):
+            chunk_outcome = await self._process_chunk(
+                article=article,
+                article_id=checkpoint.article_id,
+                chunk_text=chunks[i],
+                chunk_idx=i,
+                total_chunks=checkpoint.total_chunks,
+                recency=recency,
+                token_owners=token_owners,
+                use_llm_fallback=use_llm_fallback,
+            )
+            if chunk_outcome is None:
+                # Extractor reported an error for this chunk — stop here so
+                # the next invocation retries from the same index.
+                extraction_error = f"chunk {i + 1}: extractor error"
+                break
+
+            people_seen.update(chunk_outcome[0])
+            rels_stored += chunk_outcome[1]
+            final_chunks_processed = i + 1
+
+        return {
+            "article_url": url,
+            "article_id": checkpoint.article_id,
+            "title": article.title,
+            "people_resolved": len(people_seen),
+            "relationships_stored": rels_stored,
+            "extraction_error": extraction_error,
+            "status": "processed",
+            "chunks_processed": final_chunks_processed,
+            "total_chunks": checkpoint.total_chunks,
+        }
+
+    # ─────────────────────────────────────────── process_article: sub-steps
+
+    async def _crawl(self, url: str) -> ArticleContent:
+        """Pick the right crawler for *url* and fetch the article body."""
+        crawler = CrawlerRegistry.for_url(url)
+        if crawler is None:
+            raise ValueError(f"No crawler registered for URL: {url}")
+        article = await crawler.fetch_article(url)
+        if article is None:
+            raise RuntimeError(f"Crawler returned nothing for: {url}")
+        return article
+
+    async def _prepare_checkpoint(
+        self,
+        *,
+        url: str,
+        article: ArticleContent,
+        body_hash: str,
+        chunk_size: int,
+        total_chunks: int,
+    ) -> _Checkpoint:
+        """
+        Decide where this run should start, inside one setup transaction.
+
+        Four outcomes:
+          * fresh article → insert and start at 0
+          * pre-checkpoint legacy row → treat as done (caller short-circuits)
+          * body_hash mismatch → reset and start at 0
+          * existing row, partial / complete progress → resume or signal done
+        """
         async with get_session() as session:
             repo = GraphRepository(session)
             existing = await repo.get_article_by_url(url)
 
             if existing is None:
-                # Fresh article: insert with frozen chunking params.
                 article_id = await repo.upsert_article(
                     url=article.url,
                     title=article.title,
@@ -130,190 +244,161 @@ class GraphService:
                     sentences_per_chunk=chunk_size,
                     total_chunks=total_chunks,
                 )
-                start_idx = 0
-                stored_total = total_chunks
-                stored_chunk_size = chunk_size
                 logger.info(
                     "Article %s: starting fresh, %d chunk(s) to process.",
-                    url, stored_total,
+                    url, total_chunks,
+                )
+                return _Checkpoint(
+                    article_id=article_id, title=article.title,
+                    start_idx=0, total_chunks=total_chunks,
+                    chunk_size=chunk_size, done=False,
+                )
+
+            article_id = existing.id
+
+            # Legacy row from before checkpointing existed (migration added
+            # the columns with NULL/0 defaults). Trust that it was fully
+            # processed under the old code path; the user can delete it
+            # manually to force a re-run.
+            if existing.total_chunks is None:
+                logger.info(
+                    "Article %s: pre-checkpoint row, treating as complete.", url,
+                )
+                return _Checkpoint(
+                    article_id=article_id, title=existing.title,
+                    start_idx=0, total_chunks=0,
+                    chunk_size=chunk_size, done=True,
+                )
+
+            # Body changed since last run? rewind and replay.
+            if existing.body_hash != body_hash:
+                logger.info(
+                    "Article %s: body changed since last run "
+                    "(stored hash %.8s, new hash %.8s); resetting "
+                    "checkpoint and replaying from chunk 1/%d.",
+                    url, existing.body_hash or "", body_hash, total_chunks,
+                )
+                await repo.reset_article_for_rerun(
+                    article_id,
+                    body_hash=body_hash,
+                    sentences_per_chunk=chunk_size,
+                    total_chunks=total_chunks,
+                )
+                return _Checkpoint(
+                    article_id=article_id, title=existing.title,
+                    start_idx=0, total_chunks=total_chunks,
+                    chunk_size=chunk_size, done=False,
+                )
+
+            start_idx = existing.chunks_processed or 0
+            stored_total = existing.total_chunks or total_chunks
+            stored_chunk_size = existing.sentences_per_chunk or chunk_size
+
+            if start_idx >= stored_total and stored_total > 0:
+                logger.info(
+                    "Article %s: already complete (%d/%d chunks), skipping.",
+                    url, stored_total, stored_total,
+                )
+                return _Checkpoint(
+                    article_id=article_id, title=existing.title,
+                    start_idx=start_idx, total_chunks=stored_total,
+                    chunk_size=stored_chunk_size, done=True,
+                )
+
+            if start_idx > 0:
+                logger.info(
+                    "Article %s: found progress at chunk %d/%d, "
+                    "resuming (%d chunk(s) left).",
+                    url, start_idx, stored_total, stored_total - start_idx,
                 )
             else:
-                article_id = existing.id
-
-                # Legacy row from before checkpointing existed (migration
-                # added the columns with NULL/0 defaults). Trust that it
-                # was fully processed under the old code path and skip;
-                # the user can delete it manually to force a re-run.
-                if existing.total_chunks is None:
-                    logger.info(
-                        "Article %s: pre-checkpoint row, treating as complete.",
-                        url,
-                    )
-                    return {
-                        "article_url": url,
-                        "article_id": article_id,
-                        "title": existing.title,
-                        "people_resolved": 0,
-                        "relationships_stored": 0,
-                        "extraction_error": None,
-                        "status": "already_exists",
-                    }
-
-                # Body changed since last run? rewind and replay.
-                if existing.body_hash != body_hash:
-                    logger.info(
-                        "Article %s: body changed since last run "
-                        "(stored hash %.8s, new hash %.8s); resetting "
-                        "checkpoint and replaying from chunk 1/%d.",
-                        url, existing.body_hash or "", body_hash, total_chunks,
-                    )
-                    await repo.reset_article_for_rerun(
-                        article_id,
-                        body_hash=body_hash,
-                        sentences_per_chunk=chunk_size,
-                        total_chunks=total_chunks,
-                    )
-                    start_idx = 0
-                    stored_total = total_chunks
-                    stored_chunk_size = chunk_size
-                else:
-                    start_idx = existing.chunks_processed or 0
-                    stored_total = existing.total_chunks or total_chunks
-                    stored_chunk_size = existing.sentences_per_chunk or chunk_size
-
-                    if start_idx >= stored_total and stored_total > 0:
-                        logger.info(
-                            "Article %s: already complete (%d/%d chunks), skipping.",
-                            url, stored_total, stored_total,
-                        )
-                        return {
-                            "article_url": url,
-                            "article_id": article_id,
-                            "title": existing.title,
-                            "people_resolved": 0,
-                            "relationships_stored": 0,
-                            "extraction_error": None,
-                            "status": "already_exists",
-                        }
-                    elif start_idx > 0:
-                        logger.info(
-                            "Article %s: found progress at chunk %d/%d, "
-                            "resuming (%d chunk(s) left).",
-                            url, start_idx, stored_total, stored_total - start_idx,
-                        )
-                    else:
-                        # Existed but never advanced past chunk 0 (e.g.
-                        # crashed on the very first chunk last time).
-                        logger.info(
-                            "Article %s: row exists but no chunks done yet, "
-                            "starting from chunk 1/%d.",
-                            url, stored_total,
-                        )
-
-        # ── 3. re-chunk under the FROZEN sentences_per_chunk ─────────────────
-        # If the global setting differs from what the row was first chunked
-        # with, honour the stored value so chunk boundaries don't shift.
-        if stored_chunk_size != chunk_size:
-            chunks = self._extractor.split_chunks(article, stored_chunk_size)
-
-        if len(chunks) != stored_total:
-            # Should be impossible given the body_hash check above, but
-            # guard anyway — better to refuse than to scramble.
-            raise RuntimeError(
-                f"Chunk count drift for {url}: expected {stored_total}, "
-                f"computed {len(chunks)}. Delete the article row and re-run."
-            )
-
-        # ── 4. per-article recency state, used across all chunks ─────────────
-        # Initialised ONCE so a person resolved in chunk 1 disambiguates a
-        # bare reference in chunk 4. token_owners is seeded from the current
-        # alias snapshot; _resolve_or_create then maintains both maps in
-        # place via update_token_owners_and_recency as new people get added.
-        # On crash + resume the maps start empty (we lose cross-chunk recency
-        # for the resumed chunks); acceptable cost — alias-table hits still
-        # land for anything we already wrote.
-        recency: dict[str, str] = {}
-        token_owners: dict[str, set[str]] = {}
-        if use_recency:
-            async with get_session() as session:
-                token_owners = build_token_owners(
-                    await GraphRepository(session).get_all_aliases()
+                logger.info(
+                    "Article %s: row exists but no chunks done yet, "
+                    "starting from chunk 1/%d.", url, stored_total,
                 )
 
-        # ── 5. per-chunk loop, each in its own transaction ───────────────────
-        # On a chunk failure we STOP and leave chunks_processed where it is,
-        # so the next call to process_article retries that exact chunk. Any
-        # other behaviour would either skip the failure forever or scramble
-        # the checkpoint semantics.
+            return _Checkpoint(
+                article_id=article_id, title=existing.title,
+                start_idx=start_idx, total_chunks=stored_total,
+                chunk_size=stored_chunk_size, done=False,
+            )
+
+    async def _process_chunk(
+        self,
+        *,
+        article: ArticleContent,
+        article_id: str,
+        chunk_text: str,
+        chunk_idx: int,
+        total_chunks: int,
+        recency: dict[str, str],
+        token_owners: dict[str, set[str]],
+        use_llm_fallback: bool,
+    ) -> Optional[tuple[set[str], int]]:
+        """
+        Extract + persist one chunk inside a single transaction.
+
+        Returns
+        -------
+        (people_ids_seen, relationships_stored)
+            on success — checkpoint pointer is already bumped.
+        None
+            if the extractor reported an error for this chunk. Pointer is
+            NOT bumped, so the next invocation retries from the same index.
+        """
+        url = article.url
+        chunk_result = await self._extractor.extract_one_chunk(
+            article, chunk_text, chunk_idx, total_chunks,
+        )
+        if chunk_result.error:
+            logger.warning(
+                "Extraction error on chunk %d/%d of %s: %s — stopping; "
+                "next run will retry from here.",
+                chunk_idx + 1, total_chunks, url, chunk_result.error,
+            )
+            return None
+
         people_seen: set[str] = set()
         rels_stored = 0
-        extraction_error: Optional[str] = None
-        final_chunks_processed = start_idx
 
-        for i in range(start_idx, stored_total):
-            chunk_text = chunks[i]
-            chunk_result = await self._extractor.extract_one_chunk(
-                article, chunk_text, i, stored_total,
-            )
-            if chunk_result.error:
-                logger.warning(
-                    "Extraction error on chunk %d/%d of %s: %s — stopping; "
-                    "next run will retry from here.",
-                    i + 1, stored_total, url, chunk_result.error,
+        async with get_session() as session:
+            repo = GraphRepository(session)
+
+            name_to_id: dict[str, str] = {}
+            for ep in chunk_result.people:
+                pid = await self._resolve_or_create(
+                    ep.name, repo, name_to_id,
+                    recency=recency, token_owners=token_owners,
+                    use_llm_fallback=use_llm_fallback,
                 )
-                extraction_error = f"chunk {i + 1}: {chunk_result.error}"
-                break
+                people_seen.add(pid)
 
-            async with get_session() as session:
-                repo = GraphRepository(session)
+            for er in chunk_result.relationships:
+                src_id = name_to_id.get(er.source_person) or await self._resolve_or_create(
+                    er.source_person, repo, name_to_id,
+                    recency=recency, token_owners=token_owners,
+                    use_llm_fallback=use_llm_fallback,
+                )
+                tgt_id = name_to_id.get(er.target_person) or await self._resolve_or_create(
+                    er.target_person, repo, name_to_id,
+                    recency=recency, token_owners=token_owners,
+                    use_llm_fallback=use_llm_fallback,
+                )
+                rel_id = await repo.upsert_relationship(
+                    source_person_id=src_id,
+                    target_person_id=tgt_id,
+                    relation_type=er.relation_type,
+                    explanation=er.explanation,
+                )
+                await repo.add_provenance(rel_id, article_id, er.supporting_quote)
+                rels_stored += 1
 
-                name_to_id: dict[str, str] = {}
-                for ep in chunk_result.people:
-                    pid = await self._resolve_or_create(
-                        ep.name, repo, name_to_id,
-                        recency=recency, token_owners=token_owners,
-                        use_llm_fallback=use_llm_fallback,
-                    )
-                    people_seen.add(pid)
+            # Advance the checkpoint *inside the same transaction* as the
+            # chunk's writes. Crash before commit → nothing persists for
+            # this chunk and chunks_processed stays at chunk_idx.
+            await repo.update_chunk_progress(article_id, chunk_idx + 1)
 
-                for er in chunk_result.relationships:
-                    src_id = name_to_id.get(er.source_person) or await self._resolve_or_create(
-                        er.source_person, repo, name_to_id,
-                        recency=recency, token_owners=token_owners,
-                        use_llm_fallback=use_llm_fallback,
-                    )
-                    tgt_id = name_to_id.get(er.target_person) or await self._resolve_or_create(
-                        er.target_person, repo, name_to_id,
-                        recency=recency, token_owners=token_owners,
-                        use_llm_fallback=use_llm_fallback,
-                    )
-                    rel_id = await repo.upsert_relationship(
-                        source_person_id=src_id,
-                        target_person_id=tgt_id,
-                        relation_type=er.relation_type,
-                        explanation=er.explanation,
-                    )
-                    await repo.add_provenance(rel_id, article_id, er.supporting_quote)
-                    rels_stored += 1
-
-                # Advance the checkpoint *inside the same transaction* as
-                # the chunk's writes. Crash before commit → nothing
-                # persists for this chunk and chunks_processed stays at i.
-                await repo.update_chunk_progress(article_id, i + 1)
-
-            final_chunks_processed = i + 1  # set only after successful commit
-
-        return {
-            "article_url": url,
-            "article_id": article_id,
-            "title": article.title,
-            "people_resolved": len(people_seen),
-            "relationships_stored": rels_stored,
-            "extraction_error": extraction_error,
-            "status": "processed",
-            "chunks_processed": final_chunks_processed,
-            "total_chunks": stored_total,
-        }
+        return people_seen, rels_stored
 
     async def _resolve_or_create(
         self,
@@ -345,7 +430,8 @@ class GraphService:
             use_llm_fallback=use_llm_fallback,
         )
         if resolved:
-            person_id, canonical_name = resolved
+            person_id = resolved.person_id
+            canonical_name = resolved.canonical_name
         else:
             person_id = await repo.get_or_create_person(raw_name)
             await repo.add_alias(person_id, normalize(raw_name))

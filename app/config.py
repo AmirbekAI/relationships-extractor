@@ -7,6 +7,8 @@ Fields map 1-1 to the keys in .env.example.
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -66,6 +68,7 @@ class Settings(BaseSettings):
     )
 
 
+@lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Build once, reuse — Settings reads the env on first construction."""
     return Settings()  # type: ignore[call-arg]

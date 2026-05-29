@@ -28,6 +28,7 @@ from typing import Optional
 import pytest
 
 from app.core.entity_resolver import (
+    ResolveResult,
     build_token_owners,
     resolve_person,
     update_token_owners_and_recency,
@@ -115,7 +116,7 @@ async def test_unique_subname_auto_accepts():
         recency=recency,
     )
 
-    assert result == ("p1", "Sam Altman")
+    assert result == ResolveResult(person_id="p1", canonical_name="Sam Altman", stage="subname")
     # resolve_person doesn't write recency itself — that's _resolve_or_create's job.
     assert recency == {}
 
@@ -144,7 +145,7 @@ async def test_ambiguous_subname_recency_disambiguates():
         recency=recency,
     )
 
-    assert result == ("p1", "Anthony Ha")
+    assert result == ResolveResult(person_id="p1", canonical_name="Anthony Ha", stage="subname")
 
 
 @pytest.mark.asyncio
@@ -236,7 +237,7 @@ async def test_end_to_end_mid_article_collision_then_bare_reference():
 
     # Step 1: "Anthony Ha" — alias hit, no LLM, no collision yet.
     res1 = await resolve_person("Anthony Ha", repo, _StubExtractor(), recency=recency)
-    assert res1 == ("p1", "Anthony Ha")
+    assert res1 == ResolveResult(person_id="p1", canonical_name="Anthony Ha", stage="alias")
     update_token_owners_and_recency("p1", "Anthony Ha", token_owners, recency)
     assert recency == {}, "still only one owner of 'anthony'"
 
@@ -249,7 +250,9 @@ async def test_end_to_end_mid_article_collision_then_bare_reference():
 
     # Step 3: bare "Anthony" — must use recency to land on Anthony Garcia.
     res3 = await resolve_person("Anthony", repo, _StubExtractor(), recency=recency)
-    assert res3 == ("p2", "Anthony Garcia"), (
+    assert res3 == ResolveResult(
+        person_id="p2", canonical_name="Anthony Garcia", stage="subname",
+    ), (
         "bare 'Anthony' should resolve to the most-recently-saved Anthony "
         "via the recency mechanism populated mid-article"
     )

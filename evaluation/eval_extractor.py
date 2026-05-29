@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -64,7 +64,7 @@ def _article_from_gold(g: dict[str, Any]) -> ArticleContent:
         url=g["url"],
         title=g["title"],
         author=g.get("author"),
-        published_at=datetime.utcnow(),
+        published_at=datetime.now(timezone.utc),
         body_text=g["body_text"],
         source="techcrunch",
     )
