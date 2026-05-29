@@ -28,6 +28,18 @@ class Settings(BaseSettings):
     default_pages: int = Field(2, ge=1, le=50)
     request_delay: float = Field(1.5, ge=0)
     sentences_per_chunk: int = Field(5, ge=1)
+    max_parallel_articles: int = Field(
+        1,
+        ge=1,
+        le=50,
+        description=(
+            "Maximum number of articles processed concurrently within a single "
+            "rescan call. The crawler enforces per-host politeness internally "
+            "(via a per-instance async lock + request_delay), so raising this "
+            "only parallelises LLM extraction + DB writes, not scraper "
+            "requests to one host. Default 1 = sequential."
+        ),
+    )
 
     # ── Resolver ───────────────────────────────────────────────────────────
     resolver_recency_enabled: bool = Field(

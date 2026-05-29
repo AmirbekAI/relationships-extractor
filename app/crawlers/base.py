@@ -11,6 +11,7 @@ Nothing else in the codebase needs to change.
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
@@ -31,6 +32,17 @@ class ArticleContent:
 
 class BaseCrawler(ABC):
     source_id: str = ""     # must be overridden
+
+    def __init__(self) -> None:
+        # Per-instance lock used by subclasses to serialise outbound HTTP
+        # requests to this crawler's host. Lazy-init so the Lock binds to
+        # whatever event loop the first await runs on.
+        self._host_lock: Optional[asyncio.Lock] = None
+
+    def _get_host_lock(self) -> asyncio.Lock:
+        if self._host_lock is None:
+            self._host_lock = asyncio.Lock()
+        return self._host_lock
 
     @abstractmethod
     async def get_article_urls(self, page: int = 1) -> list[str]:

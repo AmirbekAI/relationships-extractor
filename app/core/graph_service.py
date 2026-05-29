@@ -21,6 +21,7 @@ Public API
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass
@@ -453,22 +454,36 @@ class GraphService:
         pages: int = 1,
         sentences_per_chunk: Optional[int] = None,
         source_ids: Optional[list[str]] = None,
+        max_parallel: Optional[int] = None,
     ) -> dict[str, Any]:
         """
         Iterate up to *pages* listing pages for each registered crawler
         (or just those in *source_ids*) and process every discovered article.
 
+        Concurrency
+        -----------
+        Articles are processed under an ``asyncio.Semaphore`` bounded by
+        *max_parallel* (defaulting to ``settings.max_parallel_articles``).
+        Politeness to a single host is the crawler's responsibility — it
+        holds an internal per-host async lock + delay across delay+GET so
+        the burst-rate floor is preserved even when this method fans out.
+
+        Listing pages are fetched sequentially per crawler (cheap, one
+        request per page), then every discovered URL is dispatched in
+        parallel up to the semaphore cap.
+
         Returns aggregate counts and a list of per-URL error strings.
         """
+        if max_parallel is None:
+            max_parallel = get_settings().max_parallel_articles
+
         crawlers = list(CrawlerRegistry.all().values())
         if source_ids:
             crawlers = [c for c in crawlers if c.source_id in source_ids]
 
-        total_processed = 0
-        total_skipped = 0
-        total_relationships = 0
+        # ── 1. listing pass — collect URLs (sequential per crawler) ─────────
+        work: list[str] = []
         errors: list[str] = []
-
         for crawler in crawlers:
             for page in range(1, pages + 1):
                 try:
@@ -478,25 +493,41 @@ class GraphService:
                     logger.error(msg)
                     errors.append(msg)
                     continue
+                work.extend(urls)
 
-                for url in urls:
-                    try:
-                        summary = await self.process_article(url, sentences_per_chunk)
-                        if summary.get("status") == "already_exists":
-                            total_skipped += 1
-                            continue
-                        total_processed += 1
-                        total_relationships += summary["relationships_stored"]
-                        logger.info(
-                            "Processed %s: %d people, %d relationships",
-                            url,
-                            summary["people_resolved"],
-                            summary["relationships_stored"],
-                        )
-                    except Exception as exc:
-                        msg = f"{url}: {exc}"
-                        logger.error(msg)
-                        errors.append(msg)
+        # ── 2. article pass — bounded parallelism ───────────────────────────
+        sem = asyncio.Semaphore(max_parallel)
+
+        async def _one(url: str) -> Optional[dict[str, Any]]:
+            async with sem:
+                try:
+                    return await self.process_article(url, sentences_per_chunk)
+                except Exception as exc:
+                    msg = f"{url}: {exc}"
+                    logger.error(msg)
+                    errors.append(msg)
+                    return None
+
+        summaries = await asyncio.gather(*(_one(u) for u in work))
+
+        # ── 3. roll up ──────────────────────────────────────────────────────
+        total_processed = 0
+        total_skipped = 0
+        total_relationships = 0
+        for summary in summaries:
+            if summary is None:
+                continue
+            if summary.get("status") == "already_exists":
+                total_skipped += 1
+                continue
+            total_processed += 1
+            total_relationships += summary["relationships_stored"]
+            logger.info(
+                "Processed %s: %d people, %d relationships",
+                summary["article_url"],
+                summary["people_resolved"],
+                summary["relationships_stored"],
+            )
 
         return {
             "pages_crawled": pages,
@@ -504,6 +535,7 @@ class GraphService:
             "articles_skipped": total_skipped,
             "relationships_stored": total_relationships,
             "errors": errors,
+            "max_parallel": max_parallel,
         }
 
     # ──────────────────────────────────────────────────────────────── helpers

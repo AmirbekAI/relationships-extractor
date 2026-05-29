@@ -58,6 +58,16 @@ class RescanRequest(BaseModel):
         ge=1,
         description="Sentences-per-chunk override applied to every article in this scan.",
     )
+    max_parallel: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=50,
+        description=(
+            "Override the server's max_parallel_articles for this scan only. "
+            "Higher values process articles concurrently — the crawler still "
+            "enforces per-host politeness internally."
+        ),
+    )
 
 
 class RescanResponse(BaseModel):

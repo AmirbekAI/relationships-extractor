@@ -49,8 +49,9 @@ class _StubService:
             raise self.process_article_raises
         return self.process_article_result
 
-    async def rescan(self, pages, sentences_per_chunk=None, source_ids=None):
+    async def rescan(self, pages, sentences_per_chunk=None, source_ids=None, max_parallel=None):
         self.rescan_calls.append((pages, sentences_per_chunk))
+        self.last_max_parallel = max_parallel
         return self.rescan_result
 
     async def get_counts(self) -> tuple[int, int]:

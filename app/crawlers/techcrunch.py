@@ -45,6 +45,7 @@ class TechCrunchCrawler(BaseCrawler):
         topic_url: str = "https://techcrunch.com/tag/openai/",
         request_delay: float = _POLITE_DELAY,
     ) -> None:
+        super().__init__()
         self._topic_url = topic_url.rstrip("/") + "/"
         self._delay = request_delay
         self._client: Optional[httpx.AsyncClient] = None
@@ -73,9 +74,13 @@ class TechCrunchCrawler(BaseCrawler):
         url = self._listing_url(page)
         logger.info("Fetching listing page %d: %s", page, url)
 
+        # Serialise via the per-host lock so concurrent callers (e.g. parallel
+        # rescan) don't burst requests at TechCrunch. No sleep here — listing
+        # pages aren't on the polite-delay budget; only article fetches are.
         try:
-            resp = await self._client_().get(url)
-            resp.raise_for_status()
+            async with self._get_host_lock():
+                resp = await self._client_().get(url)
+                resp.raise_for_status()
         except httpx.HTTPError as exc:
             logger.error("Listing fetch failed (%s): %s", url, exc)
             return []
@@ -111,11 +116,16 @@ class TechCrunchCrawler(BaseCrawler):
     # ── article page ─────────────────────────────────────────────────────────
 
     async def fetch_article(self, url: str) -> Optional[ArticleContent]:
-        await asyncio.sleep(self._delay)
-
+        # Hold the per-host lock across delay + GET so:
+        #   (a) only one fetch is outstanding to this host at a time, and
+        #   (b) consecutive fetches are spaced by at least `self._delay`.
+        # Concurrent rescan callers therefore can't violate politeness even
+        # with max_parallel_articles > 1 — they queue here.
         try:
-            resp = await self._client_().get(url)
-            resp.raise_for_status()
+            async with self._get_host_lock():
+                await asyncio.sleep(self._delay)
+                resp = await self._client_().get(url)
+                resp.raise_for_status()
         except httpx.HTTPError as exc:
             logger.error("Article fetch failed (%s): %s", url, exc)
             return None

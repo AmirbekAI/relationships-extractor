@@ -77,6 +77,7 @@ async def rescan(
     summary = await service.rescan(
         pages=body.pages,
         sentences_per_chunk=body.sentences_per_chunk,
+        max_parallel=body.max_parallel,
     )
 
     people_after, rels_after = await service.get_counts()
