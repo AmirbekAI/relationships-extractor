@@ -188,6 +188,33 @@ def test_dynamic_detection_mid_article_collision_bookkeeping():
 
 
 @pytest.mark.asyncio
+async def test_llm_fallback_disabled_skips_llm_returns_none():
+    """
+    Cost mode: when use_llm_fallback=False, the resolver must not call the
+    LLM even if it has plausible candidates. It returns None so the caller
+    creates a fresh Person.
+
+    Setup: a surface "Sam Altmen" (typo, sim ~0.91 — actually triggers the
+    Levenshtein auto-accept). To exercise the LLM fallback path specifically,
+    use a longer typo that lands in the 0.50–0.80 LLM-candidate window.
+    "Samuel Altmen" vs "Sam Altman": substantial similarity but well below
+    0.80, with no exact alias, no subname subset.
+    """
+    repo = _seed(("p1", "Sam Altman"))
+    extractor = _StubExtractor()  # raises AssertionError if .resolve_alias_with_llm is hit
+
+    # With LLM disabled, we expect None even though "samuel altmen" would
+    # otherwise reach the LLM (similarity in the 0.5-0.8 window via the
+    # shared 'altmen' Levenshtein noise — and not a subname subset).
+    result = await resolve_person(
+        "Samuel Altmen", repo, extractor,
+        use_llm_fallback=False,
+    )
+
+    assert result is None  # treated as a new person — caller will create it
+
+
+@pytest.mark.asyncio
 async def test_end_to_end_mid_article_collision_then_bare_reference():
     """
     The full scenario the snapshot design got wrong, end-to-end.

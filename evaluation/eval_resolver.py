@@ -56,6 +56,7 @@ class _StageSniffer(logging.Handler):
         ("subname ambiguous", "none"),       # ambiguous + no recency → refuse
         ("LLM hit", "llm"),
         ("LLM returned no match", "llm"),
+        ("LLM fallback disabled", "none"),   # cost mode: skip LLM, treat as new
         ("no candidates", "none"),
     ]
 

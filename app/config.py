@@ -40,6 +40,17 @@ class Settings(BaseSettings):
             "strict refuse-on-ambiguity behaviour."
         ),
     )
+    resolver_llm_fallback_enabled: bool = Field(
+        True,
+        description=(
+            "If True, the resolver asks the LLM to pick the canonical name "
+            "when the alias / Levenshtein / sub-name rules can't decide. "
+            "On by default — accurate but each call costs a token round-trip. "
+            "Set to False for cost-sensitive deployments where some missed "
+            "merges (duplicate Person rows) are acceptable: the resolver "
+            "skips the LLM and treats the surface form as a new person."
+        ),
+    )
 
     # ── API ────────────────────────────────────────────────────────────────
     default_page_size: int = Field(20, ge=1, le=200)

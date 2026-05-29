@@ -85,24 +85,24 @@ in Levenshtein is invisible to a pure-accuracy metric.
   `expected_stage` field is what makes this a *resolver* eval and not
   just a name-matching test.
 
-## Configurable behaviour: `resolver_recency_enabled`
+## Configurable resolver behaviour
 
-The resolver has an opt-in disambiguation mode for the ambiguous-sub-name
-case (e.g. "Anthony" when both *Anthony Ha* and *Anthony Garcia* are in
-the DB). It's **off by default**.
+Two independent knobs let you trade accuracy off against cost, set via
+env vars:
 
-* **Off (default)**: refuse to resolve the ambiguous sub-name. A fresh
-  `Person` row gets created for the surface form. Trade-off: prefers
-  *missed merges* (recoverable via later dedupe) over *wrong merges*
-  (sticky bad data).
-* **On**: every time a person is resolved or freshly created during an
-  article, the resolver updates a per-article `token_owners` map. The
-  moment any long token reaches 2+ owners, it becomes "contested" and
-  the recency map starts tracking the most-recently-saved owner. When
-  an ambiguous sub-name (e.g. just "Anthony") then appears, recency
-  picks the contested token's recent owner if they're a candidate.
+### `RESOLVER_RECENCY_ENABLED` (default `true`)
 
-  This detection is **dynamic**, not a snapshot: collisions that emerge
+Article-recency disambiguation for the ambiguous-sub-name case (e.g.
+"Anthony" when both *Anthony Ha* and *Anthony Garcia* are in the DB).
+
+* **On (default)**: every time a person is resolved or freshly created
+  during an article, the resolver updates a per-article `token_owners`
+  map. The moment any long token reaches 2+ owners, it becomes
+  "contested" and the recency map starts tracking the most-recently-
+  saved owner. When an ambiguous sub-name then appears, recency picks
+  the contested token's recent owner if they're a candidate.
+
+  Detection is **dynamic**, not a snapshot: collisions that emerge
   *mid-article* (a fresh `Anthony Garcia` introduced after `Anthony Ha`
   is already in the DB) get caught the moment they happen.
 
@@ -110,12 +110,37 @@ the DB). It's **off by default**.
   pattern, accepts the risk of a wrong merge when the article text is
   genuinely ambiguous.
 
-Set via env: `RESOLVER_RECENCY_ENABLED=true`. Decide per deployment:
-prioritise accuracy → off; prioritise coverage → on.
+* **Off**: refuse the ambiguous sub-name. A fresh `Person` row gets
+  created. Prefers *missed merges* (recoverable via later dedupe) over
+  *wrong merges* (sticky bad data).
+
+### `RESOLVER_LLM_FALLBACK_ENABLED` (default `true`)
+
+Whether the last-resort LLM disambiguator gets called when the
+alias / Levenshtein / sub-name rules can't decide.
+
+* **On (default)**: ask the LLM to pick from the fuzzy-match candidates.
+  Most accurate; each call costs a token round-trip.
+* **Off**: skip the LLM call and return None — the caller creates a
+  fresh `Person`. Cost-sensitive deployments where some missed merges
+  (duplicates) are acceptable. Manual / batch dedupe can clean up later.
+
+### Four deployment profiles
+
+| recency | llm_fallback | profile                                                         |
+| :-----: | :----------: | :-------------------------------------------------------------- |
+|   on    |     on       | **default**: max accuracy, some LLM cost per fuzzy match        |
+|   on    |    off       | cheap-with-coverage: recency catches easy cases, fuzzy → dupes  |
+|   off   |     on       | strict + thorough: LLM resolves everything ambiguous            |
+|   off   |    off       | fully deterministic, zero LLM resolver calls, most duplicates   |
+
+Decide per deployment:
+prioritise accuracy → all on; prioritise cost → all off; pick a middle
+ground from the table.
 
 The unit tests in [`tests/test_resolver.py`](../tests/test_resolver.py)
-pin the behaviour of both branches deterministically; the live eval
-above keeps testing the default (off) behaviour.
+pin the behaviour of each branch deterministically; the live resolver
+eval above keeps exercising the default profile.
 
 ## Known gaps
 

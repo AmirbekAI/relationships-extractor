@@ -131,7 +131,9 @@ class GraphService:
             # moment a token has 2+ owners (contested) the recency map starts
             # tracking it. So a collision that emerges mid-article gets
             # picked up immediately, not at the next article boundary.
-            use_recency = get_settings().resolver_recency_enabled
+            settings = get_settings()
+            use_recency = settings.resolver_recency_enabled
+            use_llm_fallback = settings.resolver_llm_fallback_enabled
             recency: dict[str, str] = {}
             token_owners: dict[str, set[str]] = {}
             if use_recency:
@@ -146,6 +148,7 @@ class GraphService:
                 await self._resolve_or_create(
                     ep.name, repo, name_to_id,
                     recency=recency, token_owners=token_owners,
+                    use_llm_fallback=use_llm_fallback,
                 )
 
             # ── 6. upsert Relationships + Provenance ──────────────────────────
@@ -154,10 +157,12 @@ class GraphService:
                 src_id = name_to_id.get(er.source_person) or await self._resolve_or_create(
                     er.source_person, repo, name_to_id,
                     recency=recency, token_owners=token_owners,
+                    use_llm_fallback=use_llm_fallback,
                 )
                 tgt_id = name_to_id.get(er.target_person) or await self._resolve_or_create(
                     er.target_person, repo, name_to_id,
                     recency=recency, token_owners=token_owners,
+                    use_llm_fallback=use_llm_fallback,
                 )
 
                 rel_id = await repo.upsert_relationship(
@@ -187,6 +192,7 @@ class GraphService:
         *,
         recency: Optional[dict[str, str]] = None,
         token_owners: Optional[dict[str, set[str]]] = None,
+        use_llm_fallback: bool = True,
     ) -> str:
         """
         Resolve *raw_name* to a person_id, creating a new Person if needed.
@@ -198,10 +204,14 @@ class GraphService:
         whose owner set is now >= 2 also gets ``recency[token] = person_id``.
         That's how a collision that emerges *mid-article* is detected the
         moment it happens, rather than at the next article boundary.
+
+        *use_llm_fallback* is forwarded to ``resolve_person`` — set to False
+        for cost-sensitive deployments where missed merges are acceptable.
         """
         resolved = await resolve_person(
             raw_name, repo, self._extractor,
             recency=recency,
+            use_llm_fallback=use_llm_fallback,
         )
         if resolved:
             person_id, canonical_name = resolved

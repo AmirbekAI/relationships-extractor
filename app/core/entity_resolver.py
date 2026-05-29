@@ -178,6 +178,7 @@ async def resolve_person(
     extractor: "LLMExtractor",
     *,
     recency: Optional[dict[str, str]] = None,
+    use_llm_fallback: bool = True,
 ) -> Optional[tuple[str, str]]:
     """
     Resolve *raw_name* → *(person_id, canonical_name)* or ``None``.
@@ -187,15 +188,19 @@ async def resolve_person(
 
     Parameters
     ----------
-    raw_name:   the name string as it appeared in the article
-    repo:       open GraphRepository (caller owns the session/transaction)
-    extractor:  LLMExtractor instance used as the last-resort resolver
-    recency:    optional READ-ONLY per-article ``token -> last_person_id``
-                map. When supplied, an ambiguous sub-name match is broken
-                by preferring the person whose id is currently mapped from
-                a token of the surface form. The resolver never *writes*
-                this map — that bookkeeping happens in ``_resolve_or_create``
-                so it covers both resolutions and freshly-created people.
+    raw_name:           the name string as it appeared in the article
+    repo:               open GraphRepository (caller owns the session/transaction)
+    extractor:          LLMExtractor instance used as the last-resort resolver
+    recency:            optional READ-ONLY per-article ``token -> last_person_id``
+                        map. When supplied, an ambiguous sub-name match is broken
+                        by preferring the person whose id is currently mapped from
+                        a token of the surface form. The resolver never *writes*
+                        this map — that bookkeeping happens in ``_resolve_or_create``
+                        so it covers both resolutions and freshly-created people.
+    use_llm_fallback:   when False, skip the final LLM disambiguator and return
+                        None instead. Trades accuracy for cost: every fuzzy match
+                        that would have gone to the LLM now becomes a fresh
+                        Person row, recoverable via later dedupe.
     """
     norm = normalize(raw_name)
     if not norm:
@@ -287,6 +292,17 @@ async def resolve_person(
     # ── 3. LLM fallback ───────────────────────────────────────────────────────
     if not llm_candidates:
         logger.debug("resolve '%s' → no candidates, treating as new person", raw_name)
+        return None
+
+    if not use_llm_fallback:
+        # Cost-sensitive mode: skip the LLM round-trip even though we have
+        # plausible candidates. Caller will create a fresh Person; manual
+        # / batch dedupe can merge later if it turns out to be wrong.
+        logger.debug(
+            "resolve '%s' → LLM fallback disabled (had %d candidate(s)), "
+            "treating as new person",
+            raw_name, len(set(llm_candidates)),
+        )
         return None
 
     # de-duplicate while preserving first-seen order
