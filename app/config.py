@@ -29,13 +29,15 @@ class Settings(BaseSettings):
 
     # ── Resolver ───────────────────────────────────────────────────────────
     resolver_recency_enabled: bool = Field(
-        False,
+        True,
         description=(
             "If True, the resolver disambiguates ambiguous first/last-name "
             "mentions within an article by preferring the most-recently-"
-            "resolved person who shares a contested token. Off by default — "
-            "trade-off: better coverage, accepts risk of wrong-merge when the "
-            "article text is genuinely ambiguous."
+            "resolved person who shares a contested token. On by default — "
+            "trade-off: better coverage of the introduce-then-shorten "
+            "journalism pattern, accepts the risk of a wrong merge when the "
+            "article text is genuinely ambiguous. Set to False to revert to "
+            "strict refuse-on-ambiguity behaviour."
         ),
     )
 
