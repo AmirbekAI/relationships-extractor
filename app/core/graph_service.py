@@ -24,7 +24,13 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from app.core.entity_resolver import normalize, resolve_person
+from app.config import get_settings
+from app.core.entity_resolver import (
+    build_token_owners,
+    normalize,
+    resolve_person,
+    update_token_owners_and_recency,
+)
 from app.crawlers.base import CrawlerRegistry
 from app.db.repository import GraphRepository
 from app.db.session import get_session
@@ -117,22 +123,41 @@ class GraphService:
                 source=article.source,
             )
 
+            # ── 4b. optional: prepare per-article recency state ───────────────
+            # When the setting is on: seed the long-token → owners map once
+            # from the current DB snapshot, and start an empty recency map.
+            # Both are maintained dynamically by _resolve_or_create — every
+            # resolution or creation can add a new owner to a token, and the
+            # moment a token has 2+ owners (contested) the recency map starts
+            # tracking it. So a collision that emerges mid-article gets
+            # picked up immediately, not at the next article boundary.
+            use_recency = get_settings().resolver_recency_enabled
+            recency: dict[str, str] = {}
+            token_owners: dict[str, set[str]] = {}
+            if use_recency:
+                token_owners = build_token_owners(await repo.get_all_aliases())
+
             # ── 5. resolve / create every extracted Person ────────────────────
             # raw_name → person_id; built up incrementally so we never resolve
             # the same name twice within the same article.
             name_to_id: dict[str, str] = {}
 
             for ep in result.people:
-                await self._resolve_or_create(ep.name, repo, name_to_id)
+                await self._resolve_or_create(
+                    ep.name, repo, name_to_id,
+                    recency=recency, token_owners=token_owners,
+                )
 
             # ── 6. upsert Relationships + Provenance ──────────────────────────
             rel_count = 0
             for er in result.relationships:
                 src_id = name_to_id.get(er.source_person) or await self._resolve_or_create(
-                    er.source_person, repo, name_to_id
+                    er.source_person, repo, name_to_id,
+                    recency=recency, token_owners=token_owners,
                 )
                 tgt_id = name_to_id.get(er.target_person) or await self._resolve_or_create(
-                    er.target_person, repo, name_to_id
+                    er.target_person, repo, name_to_id,
+                    recency=recency, token_owners=token_owners,
                 )
 
                 rel_id = await repo.upsert_relationship(
@@ -159,17 +184,36 @@ class GraphService:
         raw_name: str,
         repo: GraphRepository,
         cache: Optional[dict[str, str]] = None,
+        *,
+        recency: Optional[dict[str, str]] = None,
+        token_owners: Optional[dict[str, set[str]]] = None,
     ) -> str:
         """
         Resolve *raw_name* to a person_id, creating a new Person if needed.
         Optionally update *cache* with the result.
+
+        When *recency* and *token_owners* are both supplied (recency mode on),
+        every successful resolution OR creation updates the maps in-place:
+        the person's long tokens get added to ``token_owners``, and any token
+        whose owner set is now >= 2 also gets ``recency[token] = person_id``.
+        That's how a collision that emerges *mid-article* is detected the
+        moment it happens, rather than at the next article boundary.
         """
-        resolved = await resolve_person(raw_name, repo, self._extractor)
+        resolved = await resolve_person(
+            raw_name, repo, self._extractor,
+            recency=recency,
+        )
         if resolved:
-            person_id = resolved[0]
+            person_id, canonical_name = resolved
         else:
             person_id = await repo.get_or_create_person(raw_name)
             await repo.add_alias(person_id, normalize(raw_name))
+            canonical_name = raw_name
+
+        if recency is not None and token_owners is not None:
+            update_token_owners_and_recency(
+                person_id, canonical_name, token_owners, recency,
+            )
 
         if cache is not None:
             cache[raw_name] = person_id

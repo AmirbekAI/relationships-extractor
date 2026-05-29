@@ -52,7 +52,8 @@ class _StageSniffer(logging.Handler):
         ("alias hit", "alias"),
         ("levenshtein hit", "levenshtein"),
         ("subname hit", "subname"),
-        ("subname ambiguous", "none"),     # multiple subname matches → refuse
+        ("subname recency hit", "subname"),  # ambiguous, disambiguated by recency
+        ("subname ambiguous", "none"),       # ambiguous + no recency → refuse
         ("LLM hit", "llm"),
         ("LLM returned no match", "llm"),
         ("no candidates", "none"),

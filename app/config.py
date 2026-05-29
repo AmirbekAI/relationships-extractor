@@ -27,6 +27,18 @@ class Settings(BaseSettings):
     request_delay: float = Field(1.5, ge=0)
     sentences_per_chunk: int = Field(5, ge=1)
 
+    # ── Resolver ───────────────────────────────────────────────────────────
+    resolver_recency_enabled: bool = Field(
+        False,
+        description=(
+            "If True, the resolver disambiguates ambiguous first/last-name "
+            "mentions within an article by preferring the most-recently-"
+            "resolved person who shares a contested token. Off by default — "
+            "trade-off: better coverage, accepts risk of wrong-merge when the "
+            "article text is genuinely ambiguous."
+        ),
+    )
+
     # ── API ────────────────────────────────────────────────────────────────
     default_page_size: int = Field(20, ge=1, le=200)
     host: str = "0.0.0.0"

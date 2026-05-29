@@ -99,6 +99,53 @@ def _shares_long_token(a: str, b: str, min_len: int = _TOKEN_OVERLAP_MIN_LEN) ->
     return bool(a_tokens & b_tokens)
 
 
+def build_token_owners(
+    all_aliases: list[tuple[str, str, str]],
+    min_len: int = _TOKEN_OVERLAP_MIN_LEN,
+) -> dict[str, set[str]]:
+    """
+    Build the initial ``long_token -> {person_id, ...}`` map from the alias
+    table snapshot. Used to seed the recency mechanism at the start of an
+    article; the service then maintains this map as new people are resolved
+    or created mid-article, so newly-introduced collisions get caught the
+    moment they happen instead of at the next article boundary.
+    """
+    owners: dict[str, set[str]] = {}
+    for surface_form, person_id, _ in all_aliases:
+        for token in surface_form.split():
+            if len(token) >= min_len:
+                owners.setdefault(token, set()).add(person_id)
+    return owners
+
+
+def update_token_owners_and_recency(
+    person_id: str,
+    canonical_name: str,
+    token_owners: dict[str, set[str]],
+    recency: dict[str, str],
+    min_len: int = _TOKEN_OVERLAP_MIN_LEN,
+) -> None:
+    """
+    Bookkeeping after a person was just resolved or created.
+
+    For every long token of *canonical_name*:
+      1. Add *person_id* to that token's owner set in *token_owners*.
+      2. If the owner set now has 2+ entries (i.e. the token is currently
+         contested in the DB), set ``recency[token] = person_id``.
+
+    Net effect: ``recency`` always reflects the most-recently-handled owner
+    of every token that has at least one collision. Tokens with a single
+    owner stay out of ``recency`` entirely (no point tracking them).
+    """
+    for token in normalize(canonical_name).split():
+        if len(token) < min_len:
+            continue
+        owners = token_owners.setdefault(token, set())
+        owners.add(person_id)
+        if len(owners) >= 2:
+            recency[token] = person_id
+
+
 def _is_subname_of(surface_norm: str, alias_norm: str, min_len: int = _TOKEN_OVERLAP_MIN_LEN) -> bool:
     """
     True iff every long (>= min_len) token of *surface_norm* also appears as
@@ -129,18 +176,26 @@ async def resolve_person(
     raw_name: str,
     repo: "GraphRepository",
     extractor: "LLMExtractor",
+    *,
+    recency: Optional[dict[str, str]] = None,
 ) -> Optional[tuple[str, str]]:
     """
     Resolve *raw_name* → *(person_id, canonical_name)* or ``None``.
 
-    Side-effect: on a Levenshtein or LLM match the normalised surface form
-    is written to the aliases table so future lookups are O(1).
+    Side-effect: on a Levenshtein / sub-name / LLM match the normalised surface
+    form is written to the aliases table so future lookups are O(1).
 
     Parameters
     ----------
-    raw_name:  the name string as it appeared in the article
-    repo:      open GraphRepository (caller owns the session/transaction)
-    extractor: LLMExtractor instance used as the last-resort resolver
+    raw_name:   the name string as it appeared in the article
+    repo:       open GraphRepository (caller owns the session/transaction)
+    extractor:  LLMExtractor instance used as the last-resort resolver
+    recency:    optional READ-ONLY per-article ``token -> last_person_id``
+                map. When supplied, an ambiguous sub-name match is broken
+                by preferring the person whose id is currently mapped from
+                a token of the surface form. The resolver never *writes*
+                this map — that bookkeeping happens in ``_resolve_or_create``
+                so it covers both resolutions and freshly-created people.
     """
     norm = normalize(raw_name)
     if not norm:
@@ -196,11 +251,32 @@ async def resolve_person(
         await repo.add_alias(person_id, norm)
         return person_id, canonical_name
 
-    # ── 2.6 ambiguous sub-name (multiple matches) → refuse, no guessing ───────
-    # The LLM disambiguator has no article context, so it would pick one of
-    # the candidates by prior alone. A wrong merge is hard to undo; a fresh
-    # Person row is easy to dedupe later when more evidence arrives.
+    # ── 2.6 ambiguous sub-name (multiple matches) ─────────────────────────────
+    # Try article-recency first (opt-in via the `recency` kwarg). For each
+    # long token of the surface, see whether we've already resolved someone
+    # with that contested token earlier in this article — if exactly one such
+    # recent person is also a subname candidate, accept it.
     if len(subname_matches) > 1:
+        if recency:
+            surface_long = {
+                t for t in norm.split() if len(t) >= _TOKEN_OVERLAP_MIN_LEN
+            }
+            recent_hits = {
+                recency[t] for t in surface_long if t in recency
+            } & set(subname_matches.keys())
+            if len(recent_hits) == 1:
+                person_id = next(iter(recent_hits))
+                canonical_name = subname_matches[person_id]
+                logger.debug(
+                    "resolve '%s' → subname recency hit '%s' "
+                    "(last seen earlier in this article)",
+                    raw_name, canonical_name,
+                )
+                await repo.add_alias(person_id, norm)
+                return person_id, canonical_name
+
+        # Either recency wasn't enabled, or it didn't disambiguate.
+        # Refuse rather than letting the LLM guess without article context.
         logger.debug(
             "resolve '%s' → subname ambiguous (%d candidates: %s), "
             "treating as new person rather than guessing",

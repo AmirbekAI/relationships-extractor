@@ -85,6 +85,38 @@ in Levenshtein is invisible to a pure-accuracy metric.
   `expected_stage` field is what makes this a *resolver* eval and not
   just a name-matching test.
 
+## Configurable behaviour: `resolver_recency_enabled`
+
+The resolver has an opt-in disambiguation mode for the ambiguous-sub-name
+case (e.g. "Anthony" when both *Anthony Ha* and *Anthony Garcia* are in
+the DB). It's **off by default**.
+
+* **Off (default)**: refuse to resolve the ambiguous sub-name. A fresh
+  `Person` row gets created for the surface form. Trade-off: prefers
+  *missed merges* (recoverable via later dedupe) over *wrong merges*
+  (sticky bad data).
+* **On**: every time a person is resolved or freshly created during an
+  article, the resolver updates a per-article `token_owners` map. The
+  moment any long token reaches 2+ owners, it becomes "contested" and
+  the recency map starts tracking the most-recently-saved owner. When
+  an ambiguous sub-name (e.g. just "Anthony") then appears, recency
+  picks the contested token's recent owner if they're a candidate.
+
+  This detection is **dynamic**, not a snapshot: collisions that emerge
+  *mid-article* (a fresh `Anthony Garcia` introduced after `Anthony Ha`
+  is already in the DB) get caught the moment they happen.
+
+  Trade-off: better coverage of the "introduce-then-shorten" journalism
+  pattern, accepts the risk of a wrong merge when the article text is
+  genuinely ambiguous.
+
+Set via env: `RESOLVER_RECENCY_ENABLED=true`. Decide per deployment:
+prioritise accuracy → off; prioritise coverage → on.
+
+The unit tests in [`tests/test_resolver.py`](../tests/test_resolver.py)
+pin the behaviour of both branches deterministically; the live eval
+above keeps testing the default (off) behaviour.
+
 ## Known gaps
 
 * **No LLM-as-judge fallback.** When the LLM uses a verb that's

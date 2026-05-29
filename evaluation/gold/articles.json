@@ -44,6 +44,33 @@
     ]
   },
   {
+    "id": "amodei-siblings",
+    "comment": "Same last name (Amodei): Dario and Daniela. Tests that the LLM uses full canonical names for both siblings and doesn't leak a bare 'Amodei' as a person, even though the body mixes first-name and bare references. The extractor eval only scores LLM extraction quality; the resolver's recency disambiguation is exercised end-to-end by tests/test_resolver.py.",
+    "url": "https://techcrunch.com/2024/07/15/amodei-siblings-roadmap/",
+    "title": "Amodei Siblings Lay Out Anthropic's Year-Ahead Roadmap",
+    "author": "Sarah Chen",
+    "body_text": "Anthropic co-founders Dario Amodei and Daniela Amodei together unveiled the company's roadmap for the coming year on stage at TechCrunch Disrupt. Dario, who leads Anthropic as CEO, walked through technical milestones for the next Claude model. Daniela, the company's president, then laid out plans for responsible scaling and enterprise growth. Daniela also confirmed that headcount would expand significantly in the second half of the year. Sarah Chen reports that the siblings' joint appearance was widely seen as a deliberate show of unity ahead of intensifying competition with OpenAI.",
+    "people": ["Dario Amodei", "Daniela Amodei", "Sarah Chen"],
+    "relationships": [
+      { "source": "Dario Amodei", "target": "Daniela Amodei", "type_keywords": ["co-found", "founded", "cofound"] },
+      { "source": "Sarah Chen",   "target": "Dario Amodei",   "type_keywords": ["reports on", "covers", "writes about"] },
+      { "source": "Sarah Chen",   "target": "Daniela Amodei", "type_keywords": ["reports on", "covers", "writes about"] }
+    ]
+  },
+  {
+    "id": "anthony-collision",
+    "comment": "Same first name (Anthony): Anthony Lopez (subject) and Anthony Ha (journalist/author). Body uses 'Lopez' and full names; tests that the LLM uses full canonical names and doesn't emit a bare 'Anthony' as a person.",
+    "url": "https://techcrunch.com/2024/09/04/anthony-lopez-launches-trama/",
+    "title": "Anthony Lopez Launches AI-First Email Client",
+    "author": "Anthony Ha",
+    "body_text": "Anthony Lopez, a former Google product lead, unveiled his new venture today: an AI-first email client called Trama. Lopez said the product addresses what he called the 'attention tax' of modern inboxes. Anthony Ha, who has been covering consumer AI for TechCrunch since 2018, attended the launch event in San Francisco. Lopez confirmed that Sequoia Capital led a $14 million seed round; Roelof Botha was named as the deal partner. Anthony Ha later reported that Trama's waitlist had crossed 50,000 signups within hours of the announcement.",
+    "people": ["Anthony Lopez", "Anthony Ha", "Roelof Botha"],
+    "relationships": [
+      { "source": "Roelof Botha", "target": "Anthony Lopez", "type_keywords": ["invest", "fund", "back", "led"] },
+      { "source": "Anthony Ha",   "target": "Anthony Lopez", "type_keywords": ["reports on", "covers", "writes about"] }
+    ]
+  },
+  {
     "id": "funding-round",
     "comment": "Tests: investor/founder vocabulary, distinguishing 'invests in' from 'leads'.",
     "url": "https://techcrunch.com/2024/05/10/anthropic-raises/",
