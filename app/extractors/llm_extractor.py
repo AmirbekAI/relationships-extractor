@@ -149,12 +149,106 @@ def _merge(results: list[_ChunkResult]) -> tuple[list[_Person], list[_Relationsh
     return list(people.values()), list(rels.values())
 
 
+def _build_user_message(
+    article: ArticleContent,
+    chunk_text: str,
+    chunk_idx: int,
+    total_chunks: int,
+) -> str:
+    """
+    Compose the per-chunk user message. Crucially: only include the Author
+    line when the crawler actually found a byline — sending "Author: Unknown"
+    used to trick the LLM into emitting "Unknown" as a journalist person,
+    which then needed the filter to catch.
+
+    Title and URL stay on by default (URLs/titles aren't person-like so
+    they don't trigger the same failure mode).
+    """
+    header_lines: list[str] = []
+    if article.title:
+        header_lines.append(f"Article title: {article.title}")
+    if article.author:
+        header_lines.append(f"Author: {article.author}")
+    header_lines.append(f"URL: {article.url}")
+    header = "\n".join(header_lines)
+    return f"{header}\n\nExcerpt ({chunk_idx + 1}/{total_chunks}):\n{chunk_text}"
+
+
 # ── extractor ─────────────────────────────────────────────────────────────────
 
 class LLMExtractor:
     def __init__(self, client: BaseLLMClient, default_sentences_per_chunk: int = 10) -> None:
         self._client = client
         self._default_chunk_size = default_sentences_per_chunk
+
+    # ── primitives exposed for per-chunk processing ─────────────────────────
+
+    def split_chunks(
+        self,
+        article: ArticleContent,
+        sentences_per_chunk: Optional[int] = None,
+    ) -> list[str]:
+        """
+        Deterministically split *article.body_text* into chunk strings the
+        way ``extract()`` would. Exposed so the caller can drive chunking
+        + LLM extraction one chunk at a time (e.g. with a DB checkpoint
+        between each), and resume from a known offset on crash recovery.
+        """
+        chunk_size = sentences_per_chunk or self._default_chunk_size
+        return _chunk(_split_sentences(article.body_text), chunk_size)
+
+    async def extract_one_chunk(
+        self,
+        article: ArticleContent,
+        chunk_text: str,
+        chunk_idx: int,
+        total_chunks: int,
+    ) -> ExtractionResult:
+        """
+        Run the LLM on a single chunk and return the filtered, domain-typed
+        result. Used by the checkpoint loop in GraphService to persist work
+        chunk-by-chunk; one failure here costs at most this chunk, not the
+        whole article.
+
+        Returns the same shape as ``extract()`` (people + relationships +
+        optional error string), populated from this one chunk only.
+        """
+        user_msg = _build_user_message(article, chunk_text, chunk_idx, total_chunks)
+        try:
+            result = await self._client.structured_complete(
+                system_prompt=_EXTRACTION_SYSTEM,
+                user_message=user_msg,
+                response_schema=_ChunkResult,
+            )
+        except Exception as exc:
+            logger.error(
+                "Extraction failed on chunk %d/%d of %s: %s",
+                chunk_idx + 1, total_chunks, article.url, exc,
+            )
+            return ExtractionResult(article_url=article.url, error=str(exc))
+
+        people, rels = _merge([result])
+        people, rels, _ = filter_extraction(people, rels)
+        logger.debug(
+            "Chunk %d/%d — %d people, %d rels",
+            chunk_idx + 1, total_chunks, len(people), len(rels),
+        )
+        return ExtractionResult(
+            article_url=article.url,
+            people=[ExtractedPerson(name=p.name, role=p.role) for p in people],
+            relationships=[
+                ExtractedRelationship(
+                    source_person=r.source_person,
+                    target_person=r.target_person,
+                    relation_type=r.relation_type,
+                    explanation=r.explanation,
+                    supporting_quote=r.supporting_quote,
+                )
+                for r in rels
+            ],
+        )
+
+    # ── whole-article convenience (loops over the per-chunk primitives) ─────
 
     async def extract(
         self,
@@ -174,23 +268,20 @@ class LLMExtractor:
         if not article.body_text.strip():
             return ExtractionResult(article_url=article.url, error="Empty article body")
 
-        sentences = _split_sentences(article.body_text)
-        chunks = _chunk(sentences, chunk_size)
+        chunks = self.split_chunks(article, chunk_size)
 
         logger.info(
             "Extracting from '%s' — %d sentence(s) in %d chunk(s) of %d",
-            article.url, len(sentences), len(chunks), chunk_size,
+            article.url,
+            len(_split_sentences(article.body_text)),
+            len(chunks),
+            chunk_size,
         )
 
         chunk_results: list[_ChunkResult] = []
 
         for idx, chunk_text in enumerate(chunks):
-            user_msg = (
-                f"Article title: {article.title or 'Unknown'}\n"
-                f"Author: {article.author or 'Unknown'}\n"
-                f"URL: {article.url}\n\n"
-                f"Excerpt ({idx + 1}/{len(chunks)}):\n{chunk_text}"
-            )
+            user_msg = _build_user_message(article, chunk_text, idx, len(chunks))
             try:
                 result = await self._client.structured_complete(
                     system_prompt=_EXTRACTION_SYSTEM,

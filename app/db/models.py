@@ -15,7 +15,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, relationship
 
 
@@ -72,6 +72,22 @@ class Article(Base):
     author = Column(String, nullable=True)
     source = Column(String, nullable=True)          # e.g. "techcrunch"
     processed_at = Column(DateTime, default=datetime.utcnow)
+
+    # ── crash-recovery checkpoint ────────────────────────────────────────
+    # body_hash:           SHA-256 of body_text at chunking time. Used to
+    #                      detect that the article changed since the
+    #                      previous run; on mismatch we restart from zero.
+    # sentences_per_chunk: the value used at first chunking. Frozen for
+    #                      the life of the article so changing the global
+    #                      setting mid-flight doesn't shift chunk boundaries.
+    # total_chunks:        how many chunks the body splits into.
+    # chunks_processed:    pointer — the next chunk to extract on resume.
+    #                      When chunks_processed == total_chunks > 0, the
+    #                      article is complete (API surfaces "already_exists").
+    body_hash = Column(String, nullable=True)
+    sentences_per_chunk = Column(Integer, nullable=True)
+    total_chunks = Column(Integer, nullable=True)
+    chunks_processed = Column(Integer, nullable=False, default=0)
 
     provenance = relationship("Provenance", back_populates="article")
 

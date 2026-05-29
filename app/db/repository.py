@@ -176,7 +176,17 @@ class GraphRepository:
         published_at: datetime | None,
         author: str | None,
         source: str | None,
+        *,
+        body_hash: str | None = None,
+        sentences_per_chunk: int | None = None,
+        total_chunks: int | None = None,
     ) -> str:
+        """
+        Insert a fresh Article row, or return the existing id without touching
+        its checkpoint fields. The first insert seeds body_hash / sentences_per_chunk
+        / total_chunks (frozen for the article's lifetime); subsequent calls leave
+        those alone so a partially-processed row keeps its pointer.
+        """
         result = await self._s.execute(select(Article.id).where(Article.url == url))
         existing_id = result.scalar_one_or_none()
         if existing_id:
@@ -190,9 +200,67 @@ class GraphRepository:
             published_at=published_at,
             author=author,
             source=source,
+            body_hash=body_hash,
+            sentences_per_chunk=sentences_per_chunk,
+            total_chunks=total_chunks,
+            chunks_processed=0,
         ))
         await self._s.flush()
         return article_id
+
+    async def update_chunk_progress(self, article_id: str, chunks_processed: int) -> None:
+        """Bump the checkpoint pointer after a chunk has been durably stored."""
+        article = await self._s.get(Article, article_id)
+        if article is not None:
+            article.chunks_processed = chunks_processed
+            await self._s.flush()
+
+    async def reset_article_for_rerun(
+        self,
+        article_id: str,
+        *,
+        body_hash: str,
+        sentences_per_chunk: int,
+        total_chunks: int,
+    ) -> None:
+        """
+        The article's body changed (or chunking config did) since the last
+        run. Wipe its provenance + relationships derived purely from this
+        article, and reset the checkpoint so processing starts fresh.
+
+        Person + Alias rows are intentionally left intact — they may be
+        referenced by other articles and the resolver will re-resolve names
+        the same way on the next run.
+        """
+        # Provenance referencing this article (CASCADE wipes them via FK if we
+        # delete the article, but here we're not deleting — we're rewinding).
+        from sqlalchemy import delete
+        await self._s.execute(
+            delete(Provenance).where(Provenance.article_id == article_id)
+        )
+        # Now delete relationships that have no remaining provenance.
+        await self._s.flush()
+        orphan_rels = await self._s.execute(
+            select(Relationship.id).where(
+                ~select(Provenance.id)
+                .where(Provenance.relationship_id == Relationship.id)
+                .exists()
+            )
+        )
+        orphan_ids = [r for (r,) in orphan_rels.all()]
+        if orphan_ids:
+            await self._s.execute(
+                delete(Relationship).where(Relationship.id.in_(orphan_ids))
+            )
+
+        # Reset the article's checkpoint fields.
+        article = await self._s.get(Article, article_id)
+        if article is not None:
+            article.body_hash = body_hash
+            article.sentences_per_chunk = sentences_per_chunk
+            article.total_chunks = total_chunks
+            article.chunks_processed = 0
+        await self._s.flush()
 
     # ────────────────────────────────────────────────────────── Relationships
 

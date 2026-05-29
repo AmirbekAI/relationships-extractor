@@ -26,11 +26,16 @@ from app.extractors.filters import (
     "the board", "the company",                      # collective subjects
     "Acme Inc", "Foo Corp.", "Bar Ltd",              # suffix tails
     "Foo LLC", "Baz GmbH", "Quux Holdings",
+    "Unknown", "unknown", "UNKNOWN",                 # placeholder (LLM-injected)
+    "Anonymous", "anon", "N/A", "n/a",
+    "Unspecified", "Unattributed", "No author",
+    "Staff", "staff writer", "Editorial Staff",
+    "TBA", "tbd",
     "",                                              # empty
     "   ",                                           # whitespace only
 ])
 def test_is_organization_positives(name):
-    assert is_likely_organization(name) is True, f"{name!r} should flag as org"
+    assert is_likely_organization(name) is True, f"{name!r} should flag as non-person"
 
 
 @pytest.mark.parametrize("name", [

@@ -62,6 +62,20 @@ ORG_SUFFIXES: frozenset[str] = frozenset({
     "gmbh", "ag", "sa", "plc", "pty", "bv", "nv", "holdings",
 })
 
+
+# ── placeholder / unknown markers ────────────────────────────────────────────
+# The LLM sometimes emits these as people because the prompt feeds it
+# 'Author: Unknown' when the crawler couldn't find a byline. Caught as
+# "non-person" by the same predicate the org check uses.
+
+KNOWN_PLACEHOLDERS: frozenset[str] = frozenset({
+    "unknown", "anonymous", "anon", "n/a", "na",
+    "unspecified", "unattributed", "not specified",
+    "no author", "no byline", "staff writer", "staff",
+    "editor", "editorial staff", "the editors",
+    "tba", "tbd",
+})
+
 _TRAILING_PUNCT = re.compile(r"[.,;:!?]+$")
 
 
@@ -74,12 +88,23 @@ def _normalise_for_match(name: str) -> str:
 
 
 def is_likely_organization(name: str) -> bool:
-    """True if *name* looks like a company / org rather than a real person."""
+    """
+    True if *name* shouldn't be treated as a real person — covers companies
+    / orgs / media / government bodies AND placeholder markers like
+    'Unknown' / 'Anonymous' / 'staff writer' that the LLM sometimes emits
+    because the prompt feeds it 'Author: Unknown' when there's no byline.
+
+    Kept under this name (rather than ``is_likely_non_person``) so existing
+    call sites and tests don't break — the predicate is the same shape, the
+    blocklists just grew.
+    """
     if not name or not name.strip():
         return True  # nothing usable — treat as garbage
 
     norm = _normalise_for_match(name)
     if norm in KNOWN_ORGANIZATIONS:
+        return True
+    if norm in KNOWN_PLACEHOLDERS:
         return True
 
     # Suffix check on the last token.
