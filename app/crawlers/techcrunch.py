@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime
 from typing import Optional
 from urllib.parse import urljoin
@@ -24,10 +25,30 @@ from app.crawlers.base import ArticleContent, BaseCrawler
 logger = logging.getLogger(__name__)
 
 # ── CSS selectors ────────────────────────────────────────────────────────────
+# TechCrunch ships more than one article layout (the standard post, the
+# podcast "hero", …). Each field lists selectors in priority order; the first
+# one that matches wins, so a new layout is supported by appending a selector
+# here rather than touching the parsing code.
 _SEL_LISTING_LINK = "a.loop-card__title-link"
-_SEL_TITLE = "h1.article__title"
-_SEL_AUTHOR = "a.article__author-name"
-_SEL_DATE = "time.article__date"
+_SEL_TITLE = (
+    "h1.article__title",
+    "h1.wp-block-techcrunch-podcast-single-hero__title",
+    "h1.wp-block-post-title",
+)
+_SEL_AUTHOR = (
+    "a.article__author-name",
+    "a.wp-block-tc23-author-card-name__link",
+)
+_SEL_TIME = (
+    "time.article__date",
+    "time[datetime]",
+)
+# Containers whose text is scanned for a free-text date ("May 22, 2026") when
+# no <time> element or published-time meta tag is present (podcast layout).
+_SEL_DATE_CONTAINER = (
+    '[class*="hero__meta"], [class*="byline"], [class*="post-meta"], '
+    '[class*="post-date"]'
+)
 _SEL_BODY = "div.article-content"
 
 _USER_AGENT = "Mozilla/5.0 (compatible; RelationshipFinderBot/1.0)"
@@ -130,9 +151,9 @@ class TechCrunchCrawler(BaseCrawler):
 
         soup = BeautifulSoup(resp.text, "lxml")
 
-        title = _text(soup, _SEL_TITLE)
-        author = _text(soup, _SEL_AUTHOR)
-        published_at = _datetime(soup, _SEL_DATE)
+        title = _first_text(soup, _SEL_TITLE)
+        author = _authors(soup)
+        published_at = _published_at(soup)
         body_text = _body(soup)
 
         if not body_text:
@@ -151,23 +172,101 @@ class TechCrunchCrawler(BaseCrawler):
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+# "May 22, 2026" — the human-readable date the podcast layout renders instead
+# of a machine-readable <time datetime="…"> element.
+_LONG_DATE_RE = re.compile(r"[A-Z][a-z]+ \d{1,2}, \d{4}")
 
-def _text(soup: BeautifulSoup, selector: str) -> Optional[str]:
-    el = soup.select_one(selector)
-    return el.get_text(strip=True) if el else None
+
+def _clean(text: str) -> str:
+    """Collapse the non-breaking spaces TechCrunch sprinkles through titles."""
+    return text.replace("\xa0", " ").strip()
 
 
-def _datetime(soup: BeautifulSoup, selector: str) -> Optional[datetime]:
-    el = soup.select_one(selector)
-    if not el:
+def _first_text(soup: BeautifulSoup, selectors: tuple[str, ...]) -> Optional[str]:
+    """First non-empty text matching *selectors* in priority order."""
+    for selector in selectors:
+        el = soup.select_one(selector)
+        if el:
+            text = _clean(el.get_text(strip=True))
+            if text:
+                return text
+    return None
+
+
+def _authors(soup: BeautifulSoup) -> Optional[str]:
+    """
+    Join every byline author into one string, de-duplicated and order-preserving.
+
+    The standard layout has a single ``a.article__author-name``; the podcast
+    layout lists several ``a.wp-block-tc23-author-card-name__link`` cards (and
+    repeats them in the DOM), so we dedupe.
+    """
+    for selector in _SEL_AUTHOR:
+        anchors = soup.select(selector)
+        if not anchors:
+            continue
+        names: list[str] = []
+        seen: set[str] = set()
+        for a in anchors:
+            name = _clean(a.get_text(strip=True))
+            key = name.lower()
+            if name and key not in seen:
+                seen.add(key)
+                names.append(name)
+        if names:
+            return ", ".join(names)
+    return None
+
+
+def _parse_iso(raw: Optional[str]) -> Optional[datetime]:
+    """Parse an ISO-8601 timestamp; tolerate a trailing 'Z' on Python <3.11."""
+    if not raw:
         return None
-    raw = el.get("datetime") or el.get_text(strip=True)
     try:
-        # Python <3.11 chokes on the trailing "Z"; replace with "+00:00" so
-        # the parsed value stays timezone-aware.
         return datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except (ValueError, AttributeError):
         return None
+
+
+def _parse_long_date(raw: Optional[str]) -> Optional[datetime]:
+    """Parse a 'May 22, 2026' style human date."""
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(raw.strip(), "%B %d, %Y")
+    except (ValueError, AttributeError):
+        return None
+
+
+def _published_at(soup: BeautifulSoup) -> Optional[datetime]:
+    """
+    Resolve the publish date across layouts, most-reliable source first:
+      1. ``<meta property="article:published_time">`` (Yoast/WordPress — ISO).
+      2. A ``<time datetime="…">`` element (standard article layout).
+      3. A free-text date inside a byline/meta container (podcast layout).
+    """
+    meta = soup.find("meta", attrs={"property": "article:published_time"})
+    if meta is not None:
+        dt = _parse_iso(meta.get("content"))
+        if dt:
+            return dt
+
+    for selector in _SEL_TIME:
+        el = soup.select_one(selector)
+        if el is not None:
+            raw = el.get("datetime") or el.get_text(strip=True)
+            dt = _parse_iso(raw) or _parse_long_date(raw)
+            if dt:
+                return dt
+
+    for container in soup.select(_SEL_DATE_CONTAINER):
+        match = _LONG_DATE_RE.search(container.get_text(" ", strip=True))
+        if match:
+            dt = _parse_long_date(match.group())
+            if dt:
+                return dt
+
+    return None
 
 
 def _body(soup: BeautifulSoup) -> str:

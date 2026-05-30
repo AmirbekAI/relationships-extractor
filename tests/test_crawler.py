@@ -15,7 +15,13 @@ import httpx
 import pytest
 
 from app.crawlers.base import ArticleContent
-from app.crawlers.techcrunch import TechCrunchCrawler, _body, _datetime, _text
+from app.crawlers.techcrunch import (
+    TechCrunchCrawler,
+    _authors,
+    _body,
+    _first_text,
+    _published_at,
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Minimal HTML fixtures
@@ -64,6 +70,39 @@ ARTICLE_HTML_FALLBACK_BODY = """
   </main>
 </body></html>
 """
+
+# Podcast layout: different title/author/date markup, multiple (and in the
+# real DOM, repeated) author cards, and a free-text date with no <time> tag.
+PODCAST_ARTICLE_HTML = """
+<html><head>
+  <meta property="article:published_time" content="2026-05-22T09:00:00+00:00">
+</head><body>
+  <div class="wp-block-techcrunch-podcast-single-hero__inner">
+    <h1 class="wp-block-techcrunch-podcast-single-hero__title">Elon Musk can’t hear you</h1>
+    <div class="wp-block-techcrunch-podcast-single-hero__meta">
+      <span class="wp-block-techcrunch-podcast-single-hero__author-list">
+        <a class="wp-block-tc23-author-card-name__link" href="/author/theresa-loconsolo/">Theresa Loconsolo</a>
+        <a class="wp-block-tc23-author-card-name__link" href="/author/kirsten-korosec/">Kirsten Korosec</a>
+        <a class="wp-block-tc23-author-card-name__link" href="/author/sean-okane/">Sean O'Kane</a>
+        <a class="wp-block-tc23-author-card-name__link" href="/author/anthony-ha/">Anthony Ha</a>
+        <a class="wp-block-tc23-author-card-name__link" href="/author/anthony-ha/">Anthony Ha</a>
+      </span>
+      <span>May 22, 2026</span>
+    </div>
+  </div>
+  <div class="article-content">
+    <p>SpaceX filed its S-1.</p>
+    <p>Elon Musk commented on the IPO.</p>
+  </div>
+</body></html>
+"""
+
+# Same podcast layout but WITHOUT the published-time meta tag, so the date has
+# to come from the free-text "May 22, 2026" span.
+PODCAST_ARTICLE_HTML_NO_META = PODCAST_ARTICLE_HTML.replace(
+    '<meta property="article:published_time" content="2026-05-22T09:00:00+00:00">',
+    "",
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -228,6 +267,67 @@ async def test_fetch_article_returns_none_on_http_error():
     crawler = _make_crawler({})  # every URL → 404
     result = await crawler.fetch_article("https://techcrunch.com/2024/01/15/missing/")
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_article_parses_podcast_layout():
+    """Podcast pages use different markup — title/authors/date must still fill."""
+    url = "https://techcrunch.com/podcast/elon-musk-ipo/"
+    crawler = _make_crawler({url: PODCAST_ARTICLE_HTML})
+
+    result = await crawler.fetch_article(url)
+
+    assert result is not None
+    # &nbsp; (\xa0) collapsed to a regular space.
+    assert result.title == "Elon Musk can’t hear you"
+    # All authors joined, de-duplicated, order preserved.
+    assert result.author == (
+        "Theresa Loconsolo, Kirsten Korosec, Sean O'Kane, Anthony Ha"
+    )
+    # Date from the published-time meta tag.
+    assert result.published_at == datetime(
+        2026, 5, 22, 9, 0, 0, tzinfo=result.published_at.tzinfo
+    )
+    assert result.published_at.tzinfo is not None
+    assert "SpaceX filed its S-1" in result.body_text
+
+
+@pytest.mark.asyncio
+async def test_fetch_article_podcast_date_from_free_text():
+    """With no meta tag, the date falls back to the 'May 22, 2026' span."""
+    url = "https://techcrunch.com/podcast/no-meta/"
+    crawler = _make_crawler({url: PODCAST_ARTICLE_HTML_NO_META})
+
+    result = await crawler.fetch_article(url)
+
+    assert result is not None
+    assert result.published_at == datetime(2026, 5, 22)
+
+
+def test_authors_dedupes_and_joins():
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(PODCAST_ARTICLE_HTML, "lxml")
+    assert _authors(soup) == (
+        "Theresa Loconsolo, Kirsten Korosec, Sean O'Kane, Anthony Ha"
+    )
+
+
+def test_first_text_falls_back_through_selectors():
+    from bs4 import BeautifulSoup
+
+    # Only the podcast title selector matches → fallback must find it.
+    soup = BeautifulSoup(PODCAST_ARTICLE_HTML, "lxml")
+    from app.crawlers.techcrunch import _SEL_TITLE
+
+    assert _first_text(soup, _SEL_TITLE) == "Elon Musk can’t hear you"
+
+
+def test_published_at_returns_none_when_absent():
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup("<html><body><p>no date here</p></body></html>", "lxml")
+    assert _published_at(soup) is None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
