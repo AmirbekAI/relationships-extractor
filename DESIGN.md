@@ -10,7 +10,7 @@ favours, and (where applicable) the math that justifies it.
 ## Table of contents
 
 1. [FastAPI + async stack](#1-fastapi--async-stack)
-2. [Per-chunk checkpoints — with the EV math](#2-per-chunk-checkpoints--with-the-ev-math)
+2. [Per-chunk checkpoints](#2-per-chunk-checkpoints)
 3. [Multi-stage entity resolution](#3-multi-stage-entity-resolution)
 4. [Per-article recency for ambiguous sub-names](#4-per-article-recency-for-ambiguous-sub-names)
 5. [Semaphore + per-host lock concurrency](#5-semaphore--per-host-lock-concurrency)
@@ -44,7 +44,7 @@ across the whole codebase).
 
 ---
 
-## 2. Per-chunk checkpoints — with the EV math
+## 2. Per-chunk checkpoints
 
 **Choice.** Split the article body into N sentence-chunks; commit each
 chunk's writes plus an updated `articles.chunks_processed` pointer in one
@@ -55,117 +55,17 @@ transaction; resume at that pointer on the next call.
 malformed JSON, container restart — rolls everything back; the next
 attempt re-extracts from chunk 1.
 
-### Setup
+### Why it matters
 
-| Symbol | Meaning |
-|---|---|
-| `N` | Number of chunks per article. |
-| `c` | LLM cost of one chunk (dollars). |
-| `p` | Per-chunk probability of failure (rate limit, transient API error, etc.) — assumed independent across chunks for the model. |
-
-### With checkpoints — `E[T_yes]`
-
-Each chunk retries independently and never wastes successful work. The
-expected cost per chunk follows the geometric distribution:
-
-```
-E[cost of one chunk] = c · sum_{k=1}^{∞} k · (1-p)^{k-1} · p = c / (1-p)
-```
-
-Times N chunks:
-
-```
-E[T_yes] = c · N / (1-p)
-```
-
-### Without checkpoints — `E[T_no]`
-
-Let `T_k` be the expected total cost to finish an article given we have
-just successfully extracted `k` chunks. Without checkpoints, "successfully
-extracted" means *within the current attempt* — a later failure wipes
-that progress and forces a restart from chunk 0.
-
-For `k ∈ {0, …, N-1}`:
-
-```
-T_{k-1} = c + (1-p)·T_k + p·T_0
-T_N     = 0
-```
-
-Reading the recurrence: spend `c` on the next chunk; with probability
-`1-p` advance to `T_k`; with probability `p` roll back to `T_0`.
-
-Let `q = 1-p`. Iterating bottom-up:
-
-```
-T_{N-1} = c + p·T_0
-T_{N-2} = c + q·(c + p·T_0) + p·T_0 = c(1+q) + p(1+q)·T_0
-T_{N-3} = c(1+q+q²) + p(1+q+q²)·T_0
-…
-T_{N-k} = (c + p·T_0) · (1 + q + q² + … + q^{k-1})
-        = (c + p·T_0) · (1 - q^k) / (1 - q)
-        = (c + p·T_0) · (1 - q^k) / p
-```
-
-At `k = N`, `T_{N-k} = T_0`, so:
-
-```
-T_0 · p = (c + p·T_0) · (1 - q^N)
-T_0 · p · q^N = c · (1 - q^N)
-```
-
-Closed form:
-
-```
-E[T_no] = (c / p) · ( (1-p)^{-N} − 1 )
-```
-
-### Loss multiplier
-
-The factor by which not checkpointing inflates LLM spend per article:
-
-```
-E[T_no] / E[T_yes] = (1 - p) / (p · N) · ( (1-p)^{-N} − 1 )
-```
-
-### Numerical evaluation
-
-Using `c = $0.002 / chunk` (a representative `gpt-4o-mini` cost for a
-~500-input-token + ~500-output-token chunk) and `N = 10` chunks per
-article (~50 sentences ÷ 5 per chunk):
-
-| `p` (per-chunk failure rate) | `E[T_yes]` | `E[T_no]` | Loss multiplier |
-|---:|---:|---:|---:|
-| 0.01 (1%, calm production) | $0.0202 | $0.0211 | 1.04× |
-| 0.05 (5%, mild rate-limit pressure) | $0.0211 | $0.0252 | 1.20× |
-| 0.10 (10%, busy hour) | $0.0222 | $0.0374 | **1.68×** |
-| 0.20 (20%, hammered by 429s) | $0.0250 | $0.0830 | **3.32×** |
-| 0.30 (30%, severe degradation) | $0.0286 | $0.2243 | **7.84×** |
-
-The loss multiplier accelerates **super-linearly** in `p`. At low failure
-rates (`p ≤ 1%`) the difference is negligible; from `p ≈ 5%` upward it
-becomes the dominant term in your LLM bill, and beyond `p ≈ 30%` the
-no-checkpoint variant approaches "may never finish in a bounded retry
-budget."
-
-### Scaling to realistic workloads
-
-One rescan of 100 articles at `p = 0.10`:
-
-- With checkpoint: 100 · $0.0222 = **$2.22**
-- Without checkpoint: 100 · $0.0374 = **$3.74**
-- **Loss per rescan: $1.52**
-
-At the rescan cadence we ran during development (1 rescan / 30 min, ~50
-runs per day):
-
-- Daily loss: 50 · $1.52 = **$76 / day**
-- Annual loss: 365 · $76 = **~$27.7k / year**
-
-These are LLM-spend numbers only; the wall-clock and latency loss from
-replaying chunks is on top of that. A failed attempt at chunk 8/10 takes
-8 chunks' worth of latency to replay — and that's per failure, per
-article.
+Working the expected cost through a geometric retry model (each chunk fails
+independently with probability `p`, a failure without checkpoints forces a
+restart from chunk 1) shows that the no-checkpoint cost grows
+**super-linearly** in the per-chunk failure rate: at low `p` the two designs
+are within a few percent, but the gap widens fast as `p` climbs, and beyond
+`p ≈ 30%` the no-checkpoint variant approaches "may never finish in a bounded
+retry budget." On a realistic rescan (100 articles, busy-hour failure rates)
+that's a meaningful recurring difference in LLM spend, plus the wall-clock
+cost of replaying already-extracted chunks on every failure.
 
 ### What you give up
 
