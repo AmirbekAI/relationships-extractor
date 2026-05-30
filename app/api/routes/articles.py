@@ -10,8 +10,6 @@ fresh work apart from no-ops.
 
 from __future__ import annotations
 
-import logging
-
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.deps import get_graph_service
@@ -22,8 +20,6 @@ from app.schemas.api import (
     RescanRequest,
     RescanResponse,
 )
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["articles"])
 

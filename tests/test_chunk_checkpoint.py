@@ -278,3 +278,64 @@ async def test_already_complete_skips_extractor(temp_db):
 
     assert summary["status"] == "already_exists"
     assert boom.calls == []
+
+
+@pytest.mark.asyncio
+async def test_reset_for_rerun_only_orphans_this_articles_relationships(temp_db):
+    """
+    Regression: reset_article_for_rerun must orphan-delete ONLY relationships
+    that the article being reset supported. A relationship whose provenance
+    comes from a *different* article must survive the rerun untouched.
+    """
+    async with get_session() as session:
+        repo = GraphRepository(session)
+
+        a_id = await repo.upsert_article(
+            url="https://test.local/a",
+            title="A",
+            published_at=None,
+            author=None,
+            source="test.local",
+            body_hash="hashA",
+            sentences_per_chunk=2,
+            total_chunks=1,
+        )
+        b_id = await repo.upsert_article(
+            url="https://test.local/b",
+            title="B",
+            published_at=None,
+            author=None,
+            source="test.local",
+            body_hash="hashB",
+            sentences_per_chunk=2,
+            total_chunks=1,
+        )
+
+        p1 = await repo.get_or_create_person("Alice One")
+        p2 = await repo.get_or_create_person("Bob Two")
+        p3 = await repo.get_or_create_person("Carol Three")
+
+        # rel_a is supported ONLY by article A → must be removed on A's rerun.
+        rel_a = await repo.upsert_relationship(p1, p2, "knows", "x")
+        await repo.add_provenance(rel_a, a_id, "quote a")
+
+        # rel_b is supported ONLY by article B → must survive A's rerun.
+        rel_b = await repo.upsert_relationship(p2, p3, "funds", "y")
+        await repo.add_provenance(rel_b, b_id, "quote b")
+
+    # Rerun article A (e.g. its body changed).
+    async with get_session() as session:
+        repo = GraphRepository(session)
+        await repo.reset_article_for_rerun(
+            a_id, body_hash="hashA2", sentences_per_chunk=2, total_chunks=1
+        )
+
+    async with get_session() as session:
+        repo = GraphRepository(session)
+        # Only rel_b remains — rel_a was correctly orphaned and deleted.
+        assert await repo.count_relationships() == 1
+        surviving = await repo.get_person_relationships(p3)
+        assert len(surviving) == 1
+        assert surviving[0].relation_type == "funds"
+        # The reset article's own relationship is gone.
+        assert await repo.get_person_relationships(p1) == []

@@ -20,7 +20,6 @@ Entity-resolution write path
 from __future__ import annotations
 
 import logging
-import math
 from datetime import datetime
 from typing import Optional
 
@@ -245,25 +244,39 @@ class GraphRepository:
         referenced by other articles and the resolver will re-resolve names
         the same way on the next run.
         """
+        # Capture which relationships this article's provenance points at
+        # *before* deleting it. Only these are candidates for orphan removal —
+        # we must NOT touch relationships derived from other articles.
+        affected = await self._s.execute(
+            select(Provenance.relationship_id).where(
+                Provenance.article_id == article_id
+            )
+        )
+        affected_rel_ids = {rel_id for (rel_id,) in affected.all()}
+
         # Provenance referencing this article (CASCADE wipes them via FK if we
         # delete the article, but here we're not deleting — we're rewinding).
         await self._s.execute(
             delete(Provenance).where(Provenance.article_id == article_id)
         )
-        # Now delete relationships that have no remaining provenance.
         await self._s.flush()
-        orphan_rels = await self._s.execute(
-            select(Relationship.id).where(
-                ~select(Provenance.id)
-                .where(Provenance.relationship_id == Relationship.id)
-                .exists()
+
+        # Of the relationships this article supported, delete only those that
+        # now have no remaining provenance from any article.
+        if affected_rel_ids:
+            orphan_rels = await self._s.execute(
+                select(Relationship.id).where(
+                    Relationship.id.in_(affected_rel_ids),
+                    ~select(Provenance.id)
+                    .where(Provenance.relationship_id == Relationship.id)
+                    .exists(),
+                )
             )
-        )
-        orphan_ids = [r for (r,) in orphan_rels.all()]
-        if orphan_ids:
-            await self._s.execute(
-                delete(Relationship).where(Relationship.id.in_(orphan_ids))
-            )
+            orphan_ids = [r for (r,) in orphan_rels.all()]
+            if orphan_ids:
+                await self._s.execute(
+                    delete(Relationship).where(Relationship.id.in_(orphan_ids))
+                )
 
         # Reset the article's checkpoint fields.
         article = await self._s.get(Article, article_id)
@@ -332,11 +345,3 @@ class GraphRepository:
             )
         )
         await self._s.flush()
-
-    async def get_provenance_for_relationship(
-        self, relationship_id: str
-    ) -> list[Provenance]:
-        result = await self._s.execute(
-            select(Provenance).where(Provenance.relationship_id == relationship_id)
-        )
-        return result.scalars().all()

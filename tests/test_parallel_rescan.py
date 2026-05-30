@@ -105,13 +105,19 @@ class _ListingCrawler(BaseCrawler):
 class _SlowExtractor:
     """
     Stand-in for LLMExtractor — emits one trivial person + edge per chunk
-    after sleeping `chunk_delay` seconds. The sleep is the concurrency
-    signal: serial → N*delay, parallel → ~delay.
+    after sleeping `chunk_delay` seconds.
+
+    Tracks the peak number of `extract_one_chunk` coroutines in flight at
+    once (`max_in_flight`), which is a *deterministic* concurrency signal:
+    serial execution can never exceed 1, parallel execution exceeds 1 as
+    soon as two extractions overlap.
     """
 
     def __init__(self, chunk_delay: float) -> None:
         self._delay = chunk_delay
         self.calls = 0
+        self._in_flight = 0
+        self.max_in_flight = 0
 
     def split_chunks(self, article, sentences_per_chunk):
         from app.extractors.llm_extractor import _chunk, _split_sentences
@@ -119,22 +125,27 @@ class _SlowExtractor:
         return _chunk(_split_sentences(article.body_text), sentences_per_chunk)
 
     async def extract_one_chunk(self, article, chunk_text, idx, total):
-        await asyncio.sleep(self._delay)
-        self.calls += 1
-        name = f"Person from {article.url}"
-        return ExtractionResult(
-            article_url=article.url,
-            people=[ExtractedPerson(name=name)],
-            relationships=[
-                ExtractedRelationship(
-                    source_person=name,
-                    target_person=name,
-                    relation_type="acted",
-                    explanation="x",
-                    supporting_quote="q",
-                ),
-            ],
-        )
+        self._in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self._in_flight)
+        try:
+            await asyncio.sleep(self._delay)
+            self.calls += 1
+            name = f"Person from {article.url}"
+            return ExtractionResult(
+                article_url=article.url,
+                people=[ExtractedPerson(name=name)],
+                relationships=[
+                    ExtractedRelationship(
+                        source_person=name,
+                        target_person=name,
+                        relation_type="acted",
+                        explanation="x",
+                        supporting_quote="q",
+                    ),
+                ],
+            )
+        finally:
+            self._in_flight -= 1
 
     async def resolve_alias_with_llm(self, name, candidates):  # pragma: no cover
         raise AssertionError("LLM fallback unexpectedly invoked")
@@ -144,29 +155,33 @@ class _SlowExtractor:
 
 
 @pytest.mark.asyncio
-async def test_rescan_max_parallel_speedup(temp_db):
+async def test_rescan_max_parallel_overlaps_extraction(temp_db):
     """
-    4 articles × 200ms extractor sleep each.
-      serial   (max_parallel=1) → ~800ms
-      parallel (max_parallel=4) → ~200ms
-    We assert the parallel run is at least 2.5× faster — generous margin so
-    CI scheduler jitter doesn't make this flaky, but tight enough that a
-    regression to sequential execution would fail.
+    4 independent articles, each one slow extraction.
+
+    Instead of a wall-clock speedup assertion (inherently flaky on a loaded
+    CI box), we probe the extractor's peak concurrency directly:
+      serial   (max_parallel=1) → extractions never overlap → max_in_flight == 1
+      parallel (max_parallel=4) → extractions overlap        → max_in_flight  > 1
+    Deterministic: it depends on the scheduler letting overlapping coroutines
+    enter their `await sleep`, not on how fast the machine runs.
     """
     urls = [f"https://test.parallel/article-{i}" for i in range(4)]
     CrawlerRegistry.register(_ListingCrawler(urls))
 
-    # Serial baseline.
-    extractor_serial = _SlowExtractor(chunk_delay=0.2)
+    # Serial baseline — extractions must never overlap.
+    extractor_serial = _SlowExtractor(chunk_delay=0.05)
     svc = GraphService(extractor=extractor_serial)
 
-    t0 = time.perf_counter()
     summary_serial = await svc.rescan(pages=1, max_parallel=1)
-    serial_secs = time.perf_counter() - t0
 
     assert summary_serial["articles_processed"] == 4
     assert summary_serial["max_parallel"] == 1
     assert extractor_serial.calls == 4
+    assert extractor_serial.max_in_flight == 1, (
+        "serial rescan must never run two extractions at once; "
+        f"saw {extractor_serial.max_in_flight} in flight"
+    )
 
     # New ephemeral DB for the parallel run so chunks_processed bookkeeping
     # doesn't short-circuit the second pass via "already_exists".
@@ -177,12 +192,10 @@ async def test_rescan_max_parallel_speedup(temp_db):
 
         CrawlerRegistry._registry.clear()
         CrawlerRegistry.register(_ListingCrawler(urls))
-        extractor_parallel = _SlowExtractor(chunk_delay=0.2)
+        extractor_parallel = _SlowExtractor(chunk_delay=0.05)
         svc = GraphService(extractor=extractor_parallel)
 
-        t0 = time.perf_counter()
         summary_parallel = await svc.rescan(pages=1, max_parallel=4)
-        parallel_secs = time.perf_counter() - t0
     finally:
         if os.path.exists(tf.name):
             os.unlink(tf.name)
@@ -190,11 +203,9 @@ async def test_rescan_max_parallel_speedup(temp_db):
     assert summary_parallel["articles_processed"] == 4
     assert summary_parallel["max_parallel"] == 4
     assert extractor_parallel.calls == 4
-
-    speedup = serial_secs / parallel_secs
-    assert speedup >= 2.5, (
-        f"Expected ≥2.5× speedup from max_parallel=4 vs 1; "
-        f"got {speedup:.2f}× (serial={serial_secs:.2f}s, parallel={parallel_secs:.2f}s)"
+    assert extractor_parallel.max_in_flight >= 2, (
+        "max_parallel=4 should let extractions overlap; "
+        f"saw only {extractor_parallel.max_in_flight} in flight"
     )
 
 

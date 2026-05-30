@@ -151,7 +151,10 @@ class Provenance(Base):
         index=True,
     )
     article_id = Column(
-        String, ForeignKey("articles.id", ondelete="CASCADE"), nullable=False
+        String,
+        ForeignKey("articles.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     quote = Column(Text, nullable=True)
 
