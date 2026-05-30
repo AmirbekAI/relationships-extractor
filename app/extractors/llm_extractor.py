@@ -20,7 +20,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from app.core.models import ExtractionResult, ExtractedPerson, ExtractedRelationship
+from app.core.models import ExtractedPerson, ExtractedRelationship, ExtractionResult
 from app.crawlers.base import ArticleContent
 from app.extractors.base import BaseLLMClient
 from app.extractors.filters import filter_extraction
@@ -34,17 +34,26 @@ _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
 # ── Pydantic schemas for LLM structured output ───────────────────────────────
 
+
 class _Person(BaseModel):
     name: str = Field(description="Full canonical name, e.g. 'Sam Altman'")
-    role: Optional[str] = Field(default=None, description="Title or role, e.g. 'CEO of OpenAI'")
+    role: Optional[str] = Field(
+        default=None, description="Title or role, e.g. 'CEO of OpenAI'"
+    )
 
 
 class _Relationship(BaseModel):
     source_person: str = Field(description="Full name of the person doing the action")
-    target_person: str = Field(description="Full name of the person receiving the action")
-    relation_type: str = Field(description="Short verb phrase: 'criticizes', 'partners with', 'funds', 'leads', …")
+    target_person: str = Field(
+        description="Full name of the person receiving the action"
+    )
+    relation_type: str = Field(
+        description="Short verb phrase: 'criticizes', 'partners with', 'funds', 'leads', …"
+    )
     explanation: str = Field(description="1-2 sentence description of the relationship")
-    supporting_quote: str = Field(description="Verbatim sentence from the text that justifies this relationship")
+    supporting_quote: str = Field(
+        description="Verbatim sentence from the text that justifies this relationship"
+    )
 
 
 class _ChunkResult(BaseModel):
@@ -111,16 +120,14 @@ Return null if you are not confident.
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+
 def _split_sentences(text: str) -> list[str]:
     return [s.strip() for s in _SENTENCE_RE.split(text) if s.strip()]
 
 
 def _chunk(sentences: list[str], size: int) -> list[str]:
     """Group sentences into chunks of *size* and join each as a paragraph."""
-    return [
-        " ".join(sentences[i : i + size])
-        for i in range(0, len(sentences), size)
-    ]
+    return [" ".join(sentences[i : i + size]) for i in range(0, len(sentences), size)]
 
 
 def _merge(results: list[_ChunkResult]) -> tuple[list[_Person], list[_Relationship]]:
@@ -176,8 +183,11 @@ def _build_user_message(
 
 # ── extractor ─────────────────────────────────────────────────────────────────
 
+
 class LLMExtractor:
-    def __init__(self, client: BaseLLMClient, default_sentences_per_chunk: int = 10) -> None:
+    def __init__(
+        self, client: BaseLLMClient, default_sentences_per_chunk: int = 10
+    ) -> None:
         self._client = client
         self._default_chunk_size = default_sentences_per_chunk
 
@@ -223,7 +233,10 @@ class LLMExtractor:
         except Exception as exc:
             logger.error(
                 "Extraction failed on chunk %d/%d of %s: %s",
-                chunk_idx + 1, total_chunks, article.url, exc,
+                chunk_idx + 1,
+                total_chunks,
+                article.url,
+                exc,
             )
             return ExtractionResult(article_url=article.url, error=str(exc))
 
@@ -231,7 +244,10 @@ class LLMExtractor:
         people, rels, _ = filter_extraction(people, rels)
         logger.debug(
             "Chunk %d/%d — %d people, %d rels",
-            chunk_idx + 1, total_chunks, len(people), len(rels),
+            chunk_idx + 1,
+            total_chunks,
+            len(people),
+            len(rels),
         )
         return ExtractionResult(
             article_url=article.url,
@@ -291,14 +307,21 @@ class LLMExtractor:
                 chunk_results.append(result)
                 logger.debug(
                     "Chunk %d/%d — %d people, %d rels",
-                    idx + 1, len(chunks), len(result.people), len(result.relationships),
+                    idx + 1,
+                    len(chunks),
+                    len(result.people),
+                    len(result.relationships),
                 )
             except Exception as exc:
-                logger.error("Extraction failed on chunk %d of %s: %s", idx + 1, article.url, exc)
+                logger.error(
+                    "Extraction failed on chunk %d of %s: %s", idx + 1, article.url, exc
+                )
                 # Continue — partial results are better than nothing
 
         if not chunk_results:
-            return ExtractionResult(article_url=article.url, error="All chunks failed extraction")
+            return ExtractionResult(
+                article_url=article.url, error="All chunks failed extraction"
+            )
 
         people, rels = _merge(chunk_results)
 
@@ -309,7 +332,9 @@ class LLMExtractor:
 
         logger.info(
             "Merged: %d people, %d relationships from %s",
-            len(people), len(rels), article.url,
+            len(people),
+            len(rels),
+            article.url,
         )
 
         return ExtractionResult(
@@ -353,9 +378,9 @@ class LLMExtractor:
 
         candidate_list = "\n".join(f"- {c}" for c in candidates)
         user_msg = (
-            f"Unknown name: \"{unknown_name}\"\n\n"
+            f'Unknown name: "{unknown_name}"\n\n'
             f"Candidate canonical names:\n{candidate_list}\n\n"
-            f"Which canonical name does \"{unknown_name}\" refer to? "
+            f'Which canonical name does "{unknown_name}" refer to? '
             f"Reply null if none are a confident match."
         )
 

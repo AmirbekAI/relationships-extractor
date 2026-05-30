@@ -15,41 +15,74 @@ from app.extractors.filters import (
     is_likely_organization,
 )
 
-
 # ── is_likely_organization ───────────────────────────────────────────────────
 
-@pytest.mark.parametrize("name", [
-    "OpenAI", "openai", "OPENAI",                    # blocklist exact + case
-    "Microsoft", "Anthropic", "Google", "Amazon",
-    "Google DeepMind",                               # multi-word blocklist entry
-    "TechCrunch", "Reuters",                         # media
-    "the board", "the company",                      # collective subjects
-    "Acme Inc", "Foo Corp.", "Bar Ltd",              # suffix tails
-    "Foo LLC", "Baz GmbH", "Quux Holdings",
-    "Unknown", "unknown", "UNKNOWN",                 # placeholder (LLM-injected)
-    "Anonymous", "anon", "N/A", "n/a",
-    "Unspecified", "Unattributed", "No author",
-    "Staff", "staff writer", "Editorial Staff",
-    "TBA", "tbd",
-    "",                                              # empty
-    "   ",                                           # whitespace only
-])
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "OpenAI",
+        "openai",
+        "OPENAI",  # blocklist exact + case
+        "Microsoft",
+        "Anthropic",
+        "Google",
+        "Amazon",
+        "Google DeepMind",  # multi-word blocklist entry
+        "TechCrunch",
+        "Reuters",  # media
+        "the board",
+        "the company",  # collective subjects
+        "Acme Inc",
+        "Foo Corp.",
+        "Bar Ltd",  # suffix tails
+        "Foo LLC",
+        "Baz GmbH",
+        "Quux Holdings",
+        "Unknown",
+        "unknown",
+        "UNKNOWN",  # placeholder (LLM-injected)
+        "Anonymous",
+        "anon",
+        "N/A",
+        "n/a",
+        "Unspecified",
+        "Unattributed",
+        "No author",
+        "Staff",
+        "staff writer",
+        "Editorial Staff",
+        "TBA",
+        "tbd",
+        "",  # empty
+        "   ",  # whitespace only
+    ],
+)
 def test_is_organization_positives(name):
     assert is_likely_organization(name) is True, f"{name!r} should flag as non-person"
 
 
-@pytest.mark.parametrize("name", [
-    "Sam Altman", "Elon Musk", "Satya Nadella",
-    "Sundar Pichai", "Dario Amodei", "Greg Brockman",
-    "Mary Smith", "Pat Lee",
-    "Jean-Luc Picard",
-    "Andrew Ng",
-])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Sam Altman",
+        "Elon Musk",
+        "Satya Nadella",
+        "Sundar Pichai",
+        "Dario Amodei",
+        "Greg Brockman",
+        "Mary Smith",
+        "Pat Lee",
+        "Jean-Luc Picard",
+        "Andrew Ng",
+    ],
+)
 def test_is_organization_negatives(name):
     assert is_likely_organization(name) is False, f"{name!r} should NOT flag as org"
 
 
 # ── filter_extraction ────────────────────────────────────────────────────────
+
 
 @dataclass
 class _P:
@@ -69,13 +102,13 @@ class _R:
 def test_filter_drops_org_person_and_touching_edge():
     people = [
         _P("Sam Altman"),
-        _P("OpenAI"),                  # org — must drop
+        _P("OpenAI"),  # org — must drop
         _P("Satya Nadella"),
     ]
     rels = [
         _R("Satya Nadella", "Sam Altman", "partners with"),
-        _R("Sam Altman", "OpenAI", "leads"),                       # edge touches org
-        _R("OpenAI", "Microsoft", "partners with"),                 # both org
+        _R("Sam Altman", "OpenAI", "leads"),  # edge touches org
+        _R("OpenAI", "Microsoft", "partners with"),  # both org
     ]
 
     kept_p, kept_r, report = filter_extraction(people, rels)
@@ -83,7 +116,7 @@ def test_filter_drops_org_person_and_touching_edge():
     assert [p.name for p in kept_p] == ["Sam Altman", "Satya Nadella"]
     assert len(kept_r) == 1
     assert kept_r[0].source_person == "Satya Nadella"
-    assert report.n_dropped_people == 2     # OpenAI + Microsoft (seen via edge)
+    assert report.n_dropped_people == 2  # OpenAI + Microsoft (seen via edge)
     assert report.n_dropped_relationships == 2
 
 

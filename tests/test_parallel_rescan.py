@@ -36,8 +36,8 @@ from app.core.models import (
 from app.crawlers.base import ArticleContent, BaseCrawler, CrawlerRegistry
 from app.db.session import init_db
 
-
 # ── fixtures ─────────────────────────────────────────────────────────────────
+
 
 @pytest_asyncio.fixture
 async def temp_db():
@@ -62,12 +62,14 @@ def _reset_crawler_registry():
 
 # ── stubs ────────────────────────────────────────────────────────────────────
 
+
 class _ListingCrawler(BaseCrawler):
     """
     Hands out a configurable list of URLs from one listing page. The actual
     article fetch is a no-op delay (no host throttling needed unless a test
     explicitly sets request_delay via the constructor).
     """
+
     source_id = "test.parallel"
 
     def __init__(self, urls: list[str], request_delay: float = 0.0) -> None:
@@ -113,6 +115,7 @@ class _SlowExtractor:
 
     def split_chunks(self, article, sentences_per_chunk):
         from app.extractors.llm_extractor import _chunk, _split_sentences
+
         return _chunk(_split_sentences(article.body_text), sentences_per_chunk)
 
     async def extract_one_chunk(self, article, chunk_text, idx, total):
@@ -124,8 +127,11 @@ class _SlowExtractor:
             people=[ExtractedPerson(name=name)],
             relationships=[
                 ExtractedRelationship(
-                    source_person=name, target_person=name,
-                    relation_type="acted", explanation="x", supporting_quote="q",
+                    source_person=name,
+                    target_person=name,
+                    relation_type="acted",
+                    explanation="x",
+                    supporting_quote="q",
                 ),
             ],
         )
@@ -135,6 +141,7 @@ class _SlowExtractor:
 
 
 # ── concurrency: rescan actually overlaps article processing ─────────────────
+
 
 @pytest.mark.asyncio
 async def test_rescan_max_parallel_speedup(temp_db):
@@ -146,9 +153,7 @@ async def test_rescan_max_parallel_speedup(temp_db):
     CI scheduler jitter doesn't make this flaky, but tight enough that a
     regression to sequential execution would fail.
     """
-    urls = [
-        f"https://test.parallel/article-{i}" for i in range(4)
-    ]
+    urls = [f"https://test.parallel/article-{i}" for i in range(4)]
     CrawlerRegistry.register(_ListingCrawler(urls))
 
     # Serial baseline.
@@ -195,6 +200,7 @@ async def test_rescan_max_parallel_speedup(temp_db):
 
 # ── politeness: per-host lock serialises fetches even at high parallelism ────
 
+
 @pytest.mark.asyncio
 async def test_host_lock_keeps_fetches_sequential(temp_db):
     """
@@ -222,6 +228,7 @@ async def test_host_lock_keeps_fetches_sequential(temp_db):
 
 
 # ── correctness: a single article erroring does not sink the batch ───────────
+
 
 class _FlakyExtractor(_SlowExtractor):
     """Raises on the URL containing 'bad', succeeds on everything else."""
@@ -253,6 +260,7 @@ async def test_rescan_errors_are_isolated_per_article(temp_db):
 
 # ── default behaviour: max_parallel falls back to the Settings value ─────────
 
+
 @pytest.mark.asyncio
 async def test_rescan_uses_settings_default_when_unspecified(temp_db, monkeypatch):
     """
@@ -263,6 +271,7 @@ async def test_rescan_uses_settings_default_when_unspecified(temp_db, monkeypatc
     monkeypatch.setenv("MAX_PARALLEL_ARTICLES", "1")
     # Clear the lru_cache so the env override is picked up.
     from app.config import get_settings
+
     get_settings.cache_clear()
 
     urls = ["https://test.parallel/just-one"]

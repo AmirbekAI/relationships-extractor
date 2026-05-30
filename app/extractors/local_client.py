@@ -71,7 +71,7 @@ class LocalModelClient(BaseLLMClient):
             model=self._model,
             messages=[
                 {"role": "system", "content": augmented_system},
-                {"role": "user",   "content": user_message},
+                {"role": "user", "content": user_message},
             ],
         )
 

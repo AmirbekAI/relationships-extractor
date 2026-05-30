@@ -27,13 +27,13 @@ from app.extractors.llm_extractor import LLMExtractor
 from app.extractors.openai_client import OpenAIClient
 from evaluation.eval_extractor import (
     evaluate_extractor,
-    render_report as render_extractor_report,
 )
+from evaluation.eval_extractor import render_report as render_extractor_report
 from evaluation.eval_resolver import (
     TempEvalDB,
     evaluate_resolver,
-    render_report as render_resolver_report,
 )
+from evaluation.eval_resolver import render_report as render_resolver_report
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -41,7 +41,9 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 def _build_extractor() -> LLMExtractor:
     s = get_settings()
     client = OpenAIClient(api_key=s.openai_api_key, model=s.openai_model)
-    return LLMExtractor(client=client, default_sentences_per_chunk=s.sentences_per_chunk)
+    return LLMExtractor(
+        client=client, default_sentences_per_chunk=s.sentences_per_chunk
+    )
 
 
 async def _run(only: str | None, show_diff: bool) -> int:
@@ -49,7 +51,8 @@ async def _run(only: str | None, show_diff: bool) -> int:
 
     if only in (None, "extractor"):
         per_article, p, es, ef = await evaluate_extractor(
-            extractor, capture_diff=show_diff,
+            extractor,
+            capture_diff=show_diff,
         )
         print(render_extractor_report(per_article, p, es, ef))
 
@@ -72,7 +75,8 @@ def main() -> int:
         help="Run just one of the two eval suites (default: both).",
     )
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Print extractor + resolver debug logs as the eval runs.",
     )
@@ -80,7 +84,7 @@ def main() -> int:
         "--show-diff",
         action="store_true",
         help="Per-article: print matched / missed / extra edges so you can "
-             "see exactly what the model got right and wrong.",
+        "see exactly what the model got right and wrong.",
     )
     args = parser.parse_args()
 

@@ -25,11 +25,11 @@ from dotenv import load_dotenv
 from app.crawlers.base import ArticleContent
 from app.extractors.llm_extractor import (
     LLMExtractor,
+    _chunk,
     _ChunkResult,
+    _merge,
     _Person,
     _Relationship,
-    _chunk,
-    _merge,
     _split_sentences,
 )
 from app.extractors.openai_client import OpenAIClient
@@ -42,7 +42,10 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _article(body: str, title: str = "Test Article", author: str = "Jane Doe") -> ArticleContent:
+
+def _article(
+    body: str, title: str = "Test Article", author: str = "Jane Doe"
+) -> ArticleContent:
     return ArticleContent(
         url="https://techcrunch.com/2024/01/01/test/",
         title=title,
@@ -64,6 +67,7 @@ def _make_extractor(chunk_size: int = 10) -> LLMExtractor:
 # ─────────────────────────────────────────────────────────────────────────────
 # Unit tests: helpers (no API calls)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def test_split_sentences_basic():
     text = "Sam Altman returned. Elon Musk criticized the board. Satya Nadella expressed support."
@@ -101,7 +105,9 @@ def test_chunk_size_larger_than_input():
 
 
 def test_merge_deduplicates_people():
-    chunk1 = _ChunkResult(people=[_Person(name="Sam Altman", role="CEO")], relationships=[])
+    chunk1 = _ChunkResult(
+        people=[_Person(name="Sam Altman", role="CEO")], relationships=[]
+    )
     chunk2 = _ChunkResult(
         people=[_Person(name="Sam Altman", role="CEO"), _Person(name="Elon Musk")],
         relationships=[],
@@ -114,29 +120,42 @@ def test_merge_deduplicates_people():
 
 def test_merge_deduplicates_relationships():
     rel = _Relationship(
-        source_person="Elon Musk", target_person="Sam Altman",
-        relation_type="criticizes", explanation="x", supporting_quote="q",
+        source_person="Elon Musk",
+        target_person="Sam Altman",
+        relation_type="criticizes",
+        explanation="x",
+        supporting_quote="q",
     )
-    _, rels = _merge([
-        _ChunkResult(people=[], relationships=[rel]),
-        _ChunkResult(people=[], relationships=[rel]),
-    ])
+    _, rels = _merge(
+        [
+            _ChunkResult(people=[], relationships=[rel]),
+            _ChunkResult(people=[], relationships=[rel]),
+        ]
+    )
     assert len(rels) == 1
 
 
 def test_merge_keeps_distinct_relationships():
     rel1 = _Relationship(
-        source_person="Elon Musk", target_person="Sam Altman",
-        relation_type="criticizes", explanation="A", supporting_quote="Q1",
+        source_person="Elon Musk",
+        target_person="Sam Altman",
+        relation_type="criticizes",
+        explanation="A",
+        supporting_quote="Q1",
     )
     rel2 = _Relationship(
-        source_person="Satya Nadella", target_person="Sam Altman",
-        relation_type="supports", explanation="B", supporting_quote="Q2",
+        source_person="Satya Nadella",
+        target_person="Sam Altman",
+        relation_type="supports",
+        explanation="B",
+        supporting_quote="Q2",
     )
-    _, rels = _merge([
-        _ChunkResult(people=[], relationships=[rel1]),
-        _ChunkResult(people=[], relationships=[rel2]),
-    ])
+    _, rels = _merge(
+        [
+            _ChunkResult(people=[], relationships=[rel1]),
+            _ChunkResult(people=[], relationships=[rel2]),
+        ]
+    )
     assert len(rels) == 2
 
 
@@ -162,14 +181,20 @@ FIXED_ARTICLE = ArticleContent(
 )
 
 # What we expect the model to find — used for assertions.
-EXPECTED_PEOPLE = {"Sam Altman", "Elon Musk", "Satya Nadella", "Greg Brockman", "Jane Doe"}
+EXPECTED_PEOPLE = {
+    "Sam Altman",
+    "Elon Musk",
+    "Satya Nadella",
+    "Greg Brockman",
+    "Jane Doe",
+}
 
 EXPECTED_RELATIONSHIPS = [
     # (source, target, relation_type_substring)
-    ("Elon Musk",    "Sam Altman",    "criticiz"),
-    ("Satya Nadella","Sam Altman",    "support"),
-    ("Greg Brockman","Sam Altman",    "resign"),
-    ("Jane Doe",     "Sam Altman",    "reports"),
+    ("Elon Musk", "Sam Altman", "criticiz"),
+    ("Satya Nadella", "Sam Altman", "support"),
+    ("Greg Brockman", "Sam Altman", "resign"),
+    ("Jane Doe", "Sam Altman", "reports"),
 ]
 
 
@@ -186,9 +211,9 @@ async def test_live_extract_finds_expected_people():
 
     found_names = {p.name for p in result.people}
     for expected in EXPECTED_PEOPLE:
-        assert any(expected.lower() in n.lower() for n in found_names), (
-            f"Expected person '{expected}' not found. Got: {found_names}"
-        )
+        assert any(
+            expected.lower() in n.lower() for n in found_names
+        ), f"Expected person '{expected}' not found. Got: {found_names}"
 
 
 @pytest.mark.asyncio
@@ -225,10 +250,10 @@ async def test_live_extract_chunked_same_result():
     extractor_single = _make_extractor(chunk_size=20)
     extractor_chunked = _make_extractor(chunk_size=2)
 
-    result_single  = await extractor_single.extract(FIXED_ARTICLE)
+    result_single = await extractor_single.extract(FIXED_ARTICLE)
     result_chunked = await extractor_chunked.extract(FIXED_ARTICLE)
 
-    names_single  = {p.name for p in result_single.people}
+    names_single = {p.name for p in result_single.people}
     names_chunked = {p.name for p in result_chunked.people}
 
     print(f"\n── Single chunk  : {sorted(names_single)}")
@@ -237,9 +262,9 @@ async def test_live_extract_chunked_same_result():
     # Every person found in the single-chunk run should also appear in the
     # chunked run (chunking must not lose information).
     for name in names_single:
-        assert any(name.lower() in n.lower() for n in names_chunked), (
-            f"'{name}' found in single run but missing from chunked run"
-        )
+        assert any(
+            name.lower() in n.lower() for n in names_chunked
+        ), f"'{name}' found in single run but missing from chunked run"
 
 
 @pytest.mark.asyncio

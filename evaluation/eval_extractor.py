@@ -49,9 +49,10 @@ class EdgeDiff:
     """Per-article record of which gold edges matched vs missed and which
     predicted edges were extras (FPs). Matching uses the FUZZY rule so the
     diff reflects the most lenient pass."""
-    matched: list[tuple[str, str, str, str]]   # (src, tgt, gold_kw_repr, predicted_type)
-    missed: list[tuple[str, str, list[str]]]   # (src, tgt, type_keywords)
-    extra: list[tuple[str, str, str]]          # (src, tgt, relation_type)
+
+    matched: list[tuple[str, str, str, str]]  # (src, tgt, gold_kw_repr, predicted_type)
+    missed: list[tuple[str, str, list[str]]]  # (src, tgt, type_keywords)
+    extra: list[tuple[str, str, str]]  # (src, tgt, relation_type)
 
 
 def _load_gold() -> list[dict[str, Any]]:
@@ -79,7 +80,9 @@ def _compute_edge_diff(
     edge each predicted edge matched (or that it didn't). Returns the lists
     needed for the human-readable diff.
     """
-    norm_pred = [(normalize(s), normalize(t), rt, (s, t, rt)) for (s, t, rt) in pred_edges]
+    norm_pred = [
+        (normalize(s), normalize(t), rt, (s, t, rt)) for (s, t, rt) in pred_edges
+    ]
     gold_remaining = [
         (normalize(s), normalize(t), kws, (s, t, kws)) for (s, t, kws) in gold_edges
     ]
@@ -87,7 +90,7 @@ def _compute_edge_diff(
     matched: list[tuple[str, str, str, str]] = []
     extra: list[tuple[str, str, str]] = []
 
-    for (ps, pt, prt, raw_p) in norm_pred:
+    for ps, pt, prt, raw_p in norm_pred:
         hit_idx = None
         for i, (gs, gt, kws, _) in enumerate(gold_remaining):
             if ps == gs and pt == gt and any(k.lower() in prt.lower() for k in kws):
@@ -138,8 +141,7 @@ async def evaluate_extractor(
             for r in result.relationships
         ]
         gold_edges = [
-            (e["source"], e["target"], e["type_keywords"])
-            for e in g["relationships"]
+            (e["source"], e["target"], e["type_keywords"]) for e in g["relationships"]
         ]
         edges_strict = score_edges(pred_edges, gold_edges, fuzzy=False)
         edges_fuzzy = score_edges(pred_edges, gold_edges, fuzzy=True)
@@ -157,6 +159,7 @@ async def evaluate_extractor(
 
 
 # ── pretty printing ──────────────────────────────────────────────────────────
+
 
 def _row(label: str, s: Score) -> str:
     return (
@@ -195,7 +198,9 @@ def _render_diff(d: EdgeDiff) -> str:
     if d.matched:
         out.append(f"      ✓ matched ({len(d.matched)}):")
         for src, tgt, kws, predicted_type in d.matched:
-            out.append(f"          {src} → {tgt}  gold=[{kws}]  pred='{predicted_type}'")
+            out.append(
+                f"          {src} → {tgt}  gold=[{kws}]  pred='{predicted_type}'"
+            )
 
     if d.missed:
         out.append(f"      ✗ missed gold ({len(d.missed)}):")

@@ -22,16 +22,17 @@ from urllib.parse import urlparse
 @dataclass
 class ArticleContent:
     """Structured content returned by a crawler for a single article."""
+
     url: str
     title: Optional[str]
     author: Optional[str]
     published_at: Optional[datetime]
-    body_text: str          # clean plain-text body, ready for chunking
-    source: str             # matches BaseCrawler.source_id
+    body_text: str  # clean plain-text body, ready for chunking
+    source: str  # matches BaseCrawler.source_id
 
 
 class BaseCrawler(ABC):
-    source_id: str = ""     # must be overridden
+    source_id: str = ""  # must be overridden
 
     def __init__(self) -> None:
         # Per-instance lock used by subclasses to serialise outbound HTTP
@@ -61,6 +62,7 @@ class BaseCrawler(ABC):
 # ─────────────────────────────────────────────────────────────────────────────
 # Registry
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class CrawlerRegistry:
     _registry: dict[str, BaseCrawler] = {}

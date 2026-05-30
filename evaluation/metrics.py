@@ -21,8 +21,8 @@ from dataclasses import dataclass
 
 from app.core.entity_resolver import normalize
 
-
 # ── core P/R/F1 ─────────────────────────────────────────────────────────────
+
 
 @dataclass(frozen=True)
 class Score:
@@ -57,12 +57,14 @@ def score_sets(predicted: set, gold: set) -> Score:
 
 # ── people ──────────────────────────────────────────────────────────────────
 
+
 def normalise_people(names: list[str]) -> set[str]:
     """De-duplicate a list of names down to their normalised surface form."""
     return {n for n in (normalize(x) for x in names) if n}
 
 
 # ── edges ───────────────────────────────────────────────────────────────────
+
 
 def _relation_matches_strict(predicted_type: str, gold_keywords: list[str]) -> bool:
     p = predicted_type.strip().lower()
@@ -75,8 +77,8 @@ def _relation_matches_fuzzy(predicted_type: str, gold_keywords: list[str]) -> bo
 
 
 def score_edges(
-    predicted: list[tuple[str, str, str]],          # (src, tgt, relation_type)
-    gold: list[tuple[str, str, list[str]]],         # (src, tgt, type_keywords)
+    predicted: list[tuple[str, str, str]],  # (src, tgt, relation_type)
+    gold: list[tuple[str, str, list[str]]],  # (src, tgt, type_keywords)
     *,
     fuzzy: bool,
 ) -> Score:
@@ -93,15 +95,11 @@ def score_edges(
     matcher = _relation_matches_fuzzy if fuzzy else _relation_matches_strict
 
     # Normalise predicted edges once.
-    norm_pred = [
-        (normalize(s), normalize(t), rt) for (s, t, rt) in predicted
-    ]
+    norm_pred = [(normalize(s), normalize(t), rt) for (s, t, rt) in predicted]
     norm_pred = [(s, t, rt) for (s, t, rt) in norm_pred if s and t]
 
     # Index gold edges so we can mark them consumed.
-    gold_remaining = [
-        (normalize(s), normalize(t), kws) for (s, t, kws) in gold
-    ]
+    gold_remaining = [(normalize(s), normalize(t), kws) for (s, t, kws) in gold]
 
     tp = 0
     for s, t, rt in norm_pred:

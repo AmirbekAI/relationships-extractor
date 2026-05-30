@@ -27,7 +27,7 @@ async def test_live_parse_listing_and_first_article():
 
         print(f"\n\n{'═' * 60}")
         print(f"LISTING PAGE — found {len(urls)} URLs")
-        print('═' * 60)
+        print("═" * 60)
         for u in urls:
             print(f"  {u}")
 
@@ -39,7 +39,7 @@ async def test_live_parse_listing_and_first_article():
 
         print(f"\n{'═' * 60}")
         print("ARTICLE CONTENT")
-        print('═' * 60)
+        print("═" * 60)
         print(f"  URL          : {first_url}")
         print(f"  Title        : {article.title if article else 'N/A'}")
         print(f"  Author       : {article.author if article else 'N/A'}")
@@ -47,7 +47,7 @@ async def test_live_parse_listing_and_first_article():
         if article:
             preview = article.body_text[:800].replace("\n", " ")
             print(f"  Body preview : {preview} …")
-        print('═' * 60)
+        print("═" * 60)
 
         assert article is not None, f"fetch_article returned None for {first_url}"
         assert article.body_text.strip(), "Body text is empty"

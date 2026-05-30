@@ -35,9 +35,11 @@ Stage = Literal["alias", "levenshtein", "subname", "llm", "none"]
 @dataclass(frozen=True)
 class ResolveResult:
     """What resolve_person decided, and which tier made the call."""
+
     person_id: str
     canonical_name: str
     stage: Stage
+
 
 # ── normalisation ─────────────────────────────────────────────────────────────
 _TITLES = re.compile(
@@ -70,6 +72,7 @@ def normalize(name: str) -> str:
 
 # ── Levenshtein ───────────────────────────────────────────────────────────────
 
+
 def _levenshtein(a: str, b: str) -> int:
     """Classic O(m·n) edit distance."""
     if not a:
@@ -80,11 +83,13 @@ def _levenshtein(a: str, b: str) -> int:
     for i, ca in enumerate(a, 1):
         curr = [i]
         for j, cb in enumerate(b, 1):
-            curr.append(min(
-                prev[j] + 1,        # deletion
-                curr[j - 1] + 1,    # insertion
-                prev[j - 1] + (ca != cb),  # substitution
-            ))
+            curr.append(
+                min(
+                    prev[j] + 1,  # deletion
+                    curr[j - 1] + 1,  # insertion
+                    prev[j - 1] + (ca != cb),  # substitution
+                )
+            )
         prev = curr
     return prev[-1]
 
@@ -161,7 +166,9 @@ def update_token_owners_and_recency(
             recency[token] = person_id
 
 
-def _is_subname_of(surface_norm: str, alias_norm: str, min_len: int = _TOKEN_OVERLAP_MIN_LEN) -> bool:
+def _is_subname_of(
+    surface_norm: str, alias_norm: str, min_len: int = _TOKEN_OVERLAP_MIN_LEN
+) -> bool:
     """
     True iff every long (>= min_len) token of *surface_norm* also appears as
     a whitespace token of *alias_norm*. Captures the "first name only" /
@@ -186,6 +193,7 @@ def _is_subname_of(surface_norm: str, alias_norm: str, min_len: int = _TOKEN_OVE
 
 
 # ── main entry point ──────────────────────────────────────────────────────────
+
 
 async def resolve_person(
     raw_name: str,
@@ -254,11 +262,15 @@ async def resolve_person(
     if best_match:
         logger.debug(
             "resolve '%s' → levenshtein hit '%s' (sim=%.2f)",
-            raw_name, best_match[1], best_sim,
+            raw_name,
+            best_match[1],
+            best_sim,
         )
         await repo.add_alias(best_match[0], norm)
         return ResolveResult(
-            person_id=best_match[0], canonical_name=best_match[1], stage="levenshtein",
+            person_id=best_match[0],
+            canonical_name=best_match[1],
+            stage="levenshtein",
         )
 
     # ── 2.5 unique sub-name (e.g. first-name-only) → no LLM needed ────────────
@@ -268,11 +280,14 @@ async def resolve_person(
         person_id, canonical_name = next(iter(subname_matches.items()))
         logger.debug(
             "resolve '%s' → subname hit '%s' (unique long-token subset)",
-            raw_name, canonical_name,
+            raw_name,
+            canonical_name,
         )
         await repo.add_alias(person_id, norm)
         return ResolveResult(
-            person_id=person_id, canonical_name=canonical_name, stage="subname",
+            person_id=person_id,
+            canonical_name=canonical_name,
+            stage="subname",
         )
 
     # ── 2.6 ambiguous sub-name (multiple matches) ─────────────────────────────
@@ -282,23 +297,24 @@ async def resolve_person(
     # recent person is also a subname candidate, accept it.
     if len(subname_matches) > 1:
         if recency:
-            surface_long = {
-                t for t in norm.split() if len(t) >= _TOKEN_OVERLAP_MIN_LEN
-            }
-            recent_hits = {
-                recency[t] for t in surface_long if t in recency
-            } & set(subname_matches.keys())
+            surface_long = {t for t in norm.split() if len(t) >= _TOKEN_OVERLAP_MIN_LEN}
+            recent_hits = {recency[t] for t in surface_long if t in recency} & set(
+                subname_matches.keys()
+            )
             if len(recent_hits) == 1:
                 person_id = next(iter(recent_hits))
                 canonical_name = subname_matches[person_id]
                 logger.debug(
                     "resolve '%s' → subname recency hit '%s' "
                     "(last seen earlier in this article)",
-                    raw_name, canonical_name,
+                    raw_name,
+                    canonical_name,
                 )
                 await repo.add_alias(person_id, norm)
                 return ResolveResult(
-                    person_id=person_id, canonical_name=canonical_name, stage="subname",
+                    person_id=person_id,
+                    canonical_name=canonical_name,
+                    stage="subname",
                 )
 
         # Either recency wasn't enabled, or it didn't disambiguate.
@@ -306,7 +322,9 @@ async def resolve_person(
         logger.debug(
             "resolve '%s' → subname ambiguous (%d candidates: %s), "
             "treating as new person rather than guessing",
-            raw_name, len(subname_matches), list(subname_matches.values()),
+            raw_name,
+            len(subname_matches),
+            list(subname_matches.values()),
         )
         return None
 
@@ -322,7 +340,8 @@ async def resolve_person(
         logger.debug(
             "resolve '%s' → LLM fallback disabled (had %d candidate(s)), "
             "treating as new person",
-            raw_name, len(set(llm_candidates)),
+            raw_name,
+            len(set(llm_candidates)),
         )
         return None
 
@@ -343,7 +362,9 @@ async def resolve_person(
             logger.debug("resolve '%s' → LLM hit '%s'", raw_name, canonical_name)
             await repo.add_alias(person_id, norm)
             return ResolveResult(
-                person_id=person_id, canonical_name=canonical_name, stage="llm",
+                person_id=person_id,
+                canonical_name=canonical_name,
+                stage="llm",
             )
 
     return None

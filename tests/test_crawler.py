@@ -14,9 +14,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from app.crawlers.techcrunch import TechCrunchCrawler, _body, _datetime, _text
 from app.crawlers.base import ArticleContent
-
+from app.crawlers.techcrunch import TechCrunchCrawler, _body, _datetime, _text
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Minimal HTML fixtures
@@ -71,6 +70,7 @@ ARTICLE_HTML_FALLBACK_BODY = """
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _make_crawler(html_map: dict[str, str]) -> TechCrunchCrawler:
     """
     Return a TechCrunchCrawler whose HTTP client is replaced with a mock that
@@ -96,6 +96,7 @@ def _make_crawler(html_map: dict[str, str]) -> TechCrunchCrawler:
 # _listing_url
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def test_listing_url_page_1():
     crawler = TechCrunchCrawler()
     assert crawler._listing_url(1) == "https://techcrunch.com/tag/openai/"
@@ -115,11 +116,14 @@ def test_listing_url_page_5():
 # get_article_urls
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_get_article_urls_returns_deduplicated_links():
-    crawler = _make_crawler({
-        "https://techcrunch.com/tag/openai/": LISTING_HTML,
-    })
+    crawler = _make_crawler(
+        {
+            "https://techcrunch.com/tag/openai/": LISTING_HTML,
+        }
+    )
     urls = await crawler.get_article_urls(page=1)
 
     # Duplicate href appears once in HTML — must appear once in output
@@ -130,9 +134,11 @@ async def test_get_article_urls_returns_deduplicated_links():
 
 @pytest.mark.asyncio
 async def test_get_article_urls_page_2():
-    crawler = _make_crawler({
-        "https://techcrunch.com/tag/openai/page/2/": LISTING_HTML,
-    })
+    crawler = _make_crawler(
+        {
+            "https://techcrunch.com/tag/openai/page/2/": LISTING_HTML,
+        }
+    )
     urls = await crawler.get_article_urls(page=2)
     assert len(urls) == 2
 
@@ -140,9 +146,11 @@ async def test_get_article_urls_page_2():
 @pytest.mark.asyncio
 async def test_get_article_urls_fallback_selector():
     """When the primary selector finds nothing, fall back to h2/h3 links."""
-    crawler = _make_crawler({
-        "https://techcrunch.com/tag/openai/": LISTING_HTML_FALLBACK,
-    })
+    crawler = _make_crawler(
+        {
+            "https://techcrunch.com/tag/openai/": LISTING_HTML_FALLBACK,
+        }
+    )
     urls = await crawler.get_article_urls(page=1)
 
     assert "https://techcrunch.com/2024/01/03/article-three/" in urls
@@ -160,6 +168,7 @@ async def test_get_article_urls_returns_empty_on_http_error():
 # ─────────────────────────────────────────────────────────────────────────────
 # fetch_article
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_fetch_article_parses_all_fields():
@@ -225,8 +234,9 @@ async def test_fetch_article_returns_none_on_http_error():
 # close
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_close_is_idempotent():
     crawler = TechCrunchCrawler(request_delay=0)
-    await crawler.close()   # client never opened — should not raise
-    await crawler.close()   # second call also fine
+    await crawler.close()  # client never opened — should not raise
+    await crawler.close()  # second call also fine

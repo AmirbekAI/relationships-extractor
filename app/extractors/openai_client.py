@@ -31,7 +31,7 @@ class OpenAIClient(BaseLLMClient):
             model=self._model,
             input=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": user_message},
+                {"role": "user", "content": user_message},
             ],
             text_format=response_schema,
         )

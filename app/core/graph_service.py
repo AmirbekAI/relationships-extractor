@@ -46,6 +46,7 @@ def _body_hash(text: str) -> str:
     """Stable fingerprint of the article body; used to detect mid-flight edits."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
+
 _DEFAULT_CHUNK_SIZE = 5
 
 
@@ -59,6 +60,7 @@ class _Checkpoint:
     Otherwise *start_idx* / *total_chunks* / *chunk_size* describe where the
     per-chunk loop should resume.
     """
+
     article_id: str
     title: Optional[str]
     start_idx: int
@@ -247,12 +249,16 @@ class GraphService:
                 )
                 logger.info(
                     "Article %s: starting fresh, %d chunk(s) to process.",
-                    url, total_chunks,
+                    url,
+                    total_chunks,
                 )
                 return _Checkpoint(
-                    article_id=article_id, title=article.title,
-                    start_idx=0, total_chunks=total_chunks,
-                    chunk_size=chunk_size, done=False,
+                    article_id=article_id,
+                    title=article.title,
+                    start_idx=0,
+                    total_chunks=total_chunks,
+                    chunk_size=chunk_size,
+                    done=False,
                 )
 
             article_id = existing.id
@@ -263,12 +269,16 @@ class GraphService:
             # manually to force a re-run.
             if existing.total_chunks is None:
                 logger.info(
-                    "Article %s: pre-checkpoint row, treating as complete.", url,
+                    "Article %s: pre-checkpoint row, treating as complete.",
+                    url,
                 )
                 return _Checkpoint(
-                    article_id=article_id, title=existing.title,
-                    start_idx=0, total_chunks=0,
-                    chunk_size=chunk_size, done=True,
+                    article_id=article_id,
+                    title=existing.title,
+                    start_idx=0,
+                    total_chunks=0,
+                    chunk_size=chunk_size,
+                    done=True,
                 )
 
             # Body changed since last run? rewind and replay.
@@ -277,7 +287,10 @@ class GraphService:
                     "Article %s: body changed since last run "
                     "(stored hash %.8s, new hash %.8s); resetting "
                     "checkpoint and replaying from chunk 1/%d.",
-                    url, existing.body_hash or "", body_hash, total_chunks,
+                    url,
+                    existing.body_hash or "",
+                    body_hash,
+                    total_chunks,
                 )
                 await repo.reset_article_for_rerun(
                     article_id,
@@ -286,9 +299,12 @@ class GraphService:
                     total_chunks=total_chunks,
                 )
                 return _Checkpoint(
-                    article_id=article_id, title=existing.title,
-                    start_idx=0, total_chunks=total_chunks,
-                    chunk_size=chunk_size, done=False,
+                    article_id=article_id,
+                    title=existing.title,
+                    start_idx=0,
+                    total_chunks=total_chunks,
+                    chunk_size=chunk_size,
+                    done=False,
                 )
 
             start_idx = existing.chunks_processed or 0
@@ -298,30 +314,43 @@ class GraphService:
             if start_idx >= stored_total and stored_total > 0:
                 logger.info(
                     "Article %s: already complete (%d/%d chunks), skipping.",
-                    url, stored_total, stored_total,
+                    url,
+                    stored_total,
+                    stored_total,
                 )
                 return _Checkpoint(
-                    article_id=article_id, title=existing.title,
-                    start_idx=start_idx, total_chunks=stored_total,
-                    chunk_size=stored_chunk_size, done=True,
+                    article_id=article_id,
+                    title=existing.title,
+                    start_idx=start_idx,
+                    total_chunks=stored_total,
+                    chunk_size=stored_chunk_size,
+                    done=True,
                 )
 
             if start_idx > 0:
                 logger.info(
                     "Article %s: found progress at chunk %d/%d, "
                     "resuming (%d chunk(s) left).",
-                    url, start_idx, stored_total, stored_total - start_idx,
+                    url,
+                    start_idx,
+                    stored_total,
+                    stored_total - start_idx,
                 )
             else:
                 logger.info(
                     "Article %s: row exists but no chunks done yet, "
-                    "starting from chunk 1/%d.", url, stored_total,
+                    "starting from chunk 1/%d.",
+                    url,
+                    stored_total,
                 )
 
             return _Checkpoint(
-                article_id=article_id, title=existing.title,
-                start_idx=start_idx, total_chunks=stored_total,
-                chunk_size=stored_chunk_size, done=False,
+                article_id=article_id,
+                title=existing.title,
+                start_idx=start_idx,
+                total_chunks=stored_total,
+                chunk_size=stored_chunk_size,
+                done=False,
             )
 
     async def _process_chunk(
@@ -349,13 +378,19 @@ class GraphService:
         """
         url = article.url
         chunk_result = await self._extractor.extract_one_chunk(
-            article, chunk_text, chunk_idx, total_chunks,
+            article,
+            chunk_text,
+            chunk_idx,
+            total_chunks,
         )
         if chunk_result.error:
             logger.warning(
                 "Extraction error on chunk %d/%d of %s: %s — stopping; "
                 "next run will retry from here.",
-                chunk_idx + 1, total_chunks, url, chunk_result.error,
+                chunk_idx + 1,
+                total_chunks,
+                url,
+                chunk_result.error,
             )
             return None
 
@@ -368,21 +403,34 @@ class GraphService:
             name_to_id: dict[str, str] = {}
             for ep in chunk_result.people:
                 pid = await self._resolve_or_create(
-                    ep.name, repo, name_to_id,
-                    recency=recency, token_owners=token_owners,
+                    ep.name,
+                    repo,
+                    name_to_id,
+                    recency=recency,
+                    token_owners=token_owners,
                     use_llm_fallback=use_llm_fallback,
                 )
                 people_seen.add(pid)
 
             for er in chunk_result.relationships:
-                src_id = name_to_id.get(er.source_person) or await self._resolve_or_create(
-                    er.source_person, repo, name_to_id,
-                    recency=recency, token_owners=token_owners,
+                src_id = name_to_id.get(
+                    er.source_person
+                ) or await self._resolve_or_create(
+                    er.source_person,
+                    repo,
+                    name_to_id,
+                    recency=recency,
+                    token_owners=token_owners,
                     use_llm_fallback=use_llm_fallback,
                 )
-                tgt_id = name_to_id.get(er.target_person) or await self._resolve_or_create(
-                    er.target_person, repo, name_to_id,
-                    recency=recency, token_owners=token_owners,
+                tgt_id = name_to_id.get(
+                    er.target_person
+                ) or await self._resolve_or_create(
+                    er.target_person,
+                    repo,
+                    name_to_id,
+                    recency=recency,
+                    token_owners=token_owners,
                     use_llm_fallback=use_llm_fallback,
                 )
                 rel_id = await repo.upsert_relationship(
@@ -426,7 +474,9 @@ class GraphService:
         for cost-sensitive deployments where missed merges are acceptable.
         """
         resolved = await resolve_person(
-            raw_name, repo, self._extractor,
+            raw_name,
+            repo,
+            self._extractor,
             recency=recency,
             use_llm_fallback=use_llm_fallback,
         )
@@ -440,7 +490,10 @@ class GraphService:
 
         if recency is not None and token_owners is not None:
             update_token_owners_and_recency(
-                person_id, canonical_name, token_owners, recency,
+                person_id,
+                canonical_name,
+                token_owners,
+                recency,
             )
 
         if cache is not None:

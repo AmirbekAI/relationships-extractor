@@ -14,14 +14,14 @@ from typing import Optional
 @dataclass
 class ExtractedPerson:
     name: str
-    role: Optional[str] = None          # e.g. "CEO of OpenAI", "journalist"
+    role: Optional[str] = None  # e.g. "CEO of OpenAI", "journalist"
 
 
 @dataclass
 class ExtractedRelationship:
     source_person: str
     target_person: str
-    relation_type: str                  # e.g. "criticizes", "partners with"
+    relation_type: str  # e.g. "criticizes", "partners with"
     explanation: str
     supporting_quote: str
 
@@ -29,6 +29,7 @@ class ExtractedRelationship:
 @dataclass
 class ExtractionResult:
     """Output of the extractor for one article (or one chunk)."""
+
     article_url: str
     people: list[ExtractedPerson] = field(default_factory=list)
     relationships: list[ExtractedRelationship] = field(default_factory=list)

@@ -15,7 +15,15 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, relationship
 
 
@@ -41,7 +49,9 @@ class Person(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
-    aliases = relationship("Alias", back_populates="person", cascade="all, delete-orphan")
+    aliases = relationship(
+        "Alias", back_populates="person", cascade="all, delete-orphan"
+    )
     outgoing = relationship(
         "Relationship",
         foreign_keys="Relationship.source_person_id",
@@ -61,8 +71,10 @@ class Alias(Base):
     __table_args__ = (UniqueConstraint("surface_form"),)
 
     id = Column(String, primary_key=True, default=_uuid)
-    surface_form = Column(String, nullable=False, index=True)   # normalised form
-    person_id = Column(String, ForeignKey("people.id", ondelete="CASCADE"), nullable=False, index=True)
+    surface_form = Column(String, nullable=False, index=True)  # normalised form
+    person_id = Column(
+        String, ForeignKey("people.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     person = relationship("Person", back_populates="aliases")
 
@@ -75,7 +87,7 @@ class Article(Base):
     title = Column(String, nullable=True)
     published_at = Column(DateTime(timezone=True), nullable=True)
     author = Column(String, nullable=True)
-    source = Column(String, nullable=True)          # e.g. "techcrunch"
+    source = Column(String, nullable=True)  # e.g. "techcrunch"
     processed_at = Column(DateTime(timezone=True), default=_utcnow)
 
     # ── crash-recovery checkpoint ────────────────────────────────────────
@@ -105,27 +117,42 @@ class Relationship(Base):
     )
 
     id = Column(String, primary_key=True, default=_uuid)
-    source_person_id = Column(String, ForeignKey("people.id", ondelete="CASCADE"), nullable=False, index=True)
-    target_person_id = Column(String, ForeignKey("people.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_person_id = Column(
+        String, ForeignKey("people.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    target_person_id = Column(
+        String, ForeignKey("people.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     relation_type = Column(String, nullable=False)
     explanation = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
-    source_person = relationship("Person", foreign_keys=[source_person_id], back_populates="outgoing")
-    target_person = relationship("Person", foreign_keys=[target_person_id], back_populates="incoming")
-    provenance = relationship("Provenance", back_populates="rel", cascade="all, delete-orphan")
+    source_person = relationship(
+        "Person", foreign_keys=[source_person_id], back_populates="outgoing"
+    )
+    target_person = relationship(
+        "Person", foreign_keys=[target_person_id], back_populates="incoming"
+    )
+    provenance = relationship(
+        "Provenance", back_populates="rel", cascade="all, delete-orphan"
+    )
 
 
 class Provenance(Base):
     __tablename__ = "provenance"
-    __table_args__ = (
-        UniqueConstraint("relationship_id", "article_id"),
-    )
+    __table_args__ = (UniqueConstraint("relationship_id", "article_id"),)
 
     id = Column(String, primary_key=True, default=_uuid)
-    relationship_id = Column(String, ForeignKey("relationships.id", ondelete="CASCADE"), nullable=False, index=True)
-    article_id = Column(String, ForeignKey("articles.id", ondelete="CASCADE"), nullable=False)
+    relationship_id = Column(
+        String,
+        ForeignKey("relationships.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    article_id = Column(
+        String, ForeignKey("articles.id", ondelete="CASCADE"), nullable=False
+    )
     quote = Column(Text, nullable=True)
 
     rel = relationship("Relationship", back_populates="provenance")

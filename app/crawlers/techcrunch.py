@@ -24,17 +24,15 @@ from app.crawlers.base import ArticleContent, BaseCrawler
 logger = logging.getLogger(__name__)
 
 # ── CSS selectors ────────────────────────────────────────────────────────────
-_SEL_LISTING_LINK   = "a.loop-card__title-link"
-_SEL_TITLE          = "h1.article__title"
-_SEL_AUTHOR         = "a.article__author-name"
-_SEL_DATE           = "time.article__date"
-_SEL_BODY           = "div.article-content"
+_SEL_LISTING_LINK = "a.loop-card__title-link"
+_SEL_TITLE = "h1.article__title"
+_SEL_AUTHOR = "a.article__author-name"
+_SEL_DATE = "time.article__date"
+_SEL_BODY = "div.article-content"
 
-_USER_AGENT = (
-    "Mozilla/5.0 (compatible; RelationshipFinderBot/1.0)"
-)
-_TIMEOUT        = 30    # seconds per request
-_POLITE_DELAY   = 1.5   # seconds between requests to the same host
+_USER_AGENT = "Mozilla/5.0 (compatible; RelationshipFinderBot/1.0)"
+_TIMEOUT = 30  # seconds per request
+_POLITE_DELAY = 1.5  # seconds between requests to the same host
 
 
 class TechCrunchCrawler(BaseCrawler):
@@ -132,10 +130,10 @@ class TechCrunchCrawler(BaseCrawler):
 
         soup = BeautifulSoup(resp.text, "lxml")
 
-        title       = _text(soup, _SEL_TITLE)
-        author      = _text(soup, _SEL_AUTHOR)
+        title = _text(soup, _SEL_TITLE)
+        author = _text(soup, _SEL_AUTHOR)
         published_at = _datetime(soup, _SEL_DATE)
-        body_text   = _body(soup)
+        body_text = _body(soup)
 
         if not body_text:
             logger.warning("No body text extracted from %s", url)
@@ -152,6 +150,7 @@ class TechCrunchCrawler(BaseCrawler):
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
 
 def _text(soup: BeautifulSoup, selector: str) -> Optional[str]:
     el = soup.select_one(selector)

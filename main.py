@@ -37,9 +37,7 @@ async def lifespan(app: FastAPI):
     await init_db(settings.database_url)
 
     # ── Crawlers ──────────────────────────────────────────────────────────
-    CrawlerRegistry.register(
-        TechCrunchCrawler(request_delay=settings.request_delay)
-    )
+    CrawlerRegistry.register(TechCrunchCrawler(request_delay=settings.request_delay))
 
     # ── LLM extractor + GraphService singleton ────────────────────────────
     client = OpenAIClient(api_key=settings.openai_api_key, model=settings.openai_model)

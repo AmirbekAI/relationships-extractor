@@ -11,12 +11,13 @@ All request/response shapes for the four endpoints:
 from __future__ import annotations
 
 from typing import Optional
-from pydantic import BaseModel, AnyHttpUrl, Field
 
+from pydantic import AnyHttpUrl, BaseModel, Field
 
 # ─────────────────────────────────────────────
 # POST /articles
 # ─────────────────────────────────────────────
+
 
 class ArticleSubmitRequest(BaseModel):
     url: AnyHttpUrl = Field(
@@ -45,6 +46,7 @@ class ArticleSubmitResponse(BaseModel):
 # ─────────────────────────────────────────────
 # POST /rescan
 # ─────────────────────────────────────────────
+
 
 class RescanRequest(BaseModel):
     pages: int = Field(
@@ -75,13 +77,18 @@ class RescanResponse(BaseModel):
     articles_processed: int
     articles_skipped: int
     new_people: int = Field(description="People nodes created during this scan.")
-    new_relationships: int = Field(description="Relationship edges created during this scan.")
-    status: str = Field(description="'complete' or 'partial' (if some articles failed).")
+    new_relationships: int = Field(
+        description="Relationship edges created during this scan."
+    )
+    status: str = Field(
+        description="'complete' or 'partial' (if some articles failed)."
+    )
 
 
 # ─────────────────────────────────────────────
 # GET /people  (paginated list)
 # ─────────────────────────────────────────────
+
 
 class PersonSummary(BaseModel):
     id: str
@@ -101,6 +108,7 @@ class PaginatedPeopleResponse(BaseModel):
 # GET /people/{id}
 # ─────────────────────────────────────────────
 
+
 class ProvenanceDTO(BaseModel):
     article_id: str
     article_url: str
@@ -116,7 +124,9 @@ class RelationshipDTO(BaseModel):
     source_person_name: str
     target_person_id: str
     target_person_name: str
-    relation_type: str = Field(description="Short verb phrase, e.g. 'criticizes', 'partners with'.")
+    relation_type: str = Field(
+        description="Short verb phrase, e.g. 'criticizes', 'partners with'."
+    )
     explanation: str = Field(description="1-2 sentence human-readable description.")
     provenance: list[ProvenanceDTO]
 

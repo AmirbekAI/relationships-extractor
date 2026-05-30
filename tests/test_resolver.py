@@ -34,16 +34,19 @@ from app.core.entity_resolver import (
     update_token_owners_and_recency,
 )
 
-
 # ── minimal async test doubles ───────────────────────────────────────────────
+
 
 @dataclass
 class _StubRepo:
     """Just enough of GraphRepository to drive resolve_person."""
-    aliases: list[tuple[str, str, str]]          # (surface_form, person_id, canonical_name)
+
+    aliases: list[tuple[str, str, str]]  # (surface_form, person_id, canonical_name)
     added_aliases: list[tuple[str, str]] = field(default_factory=list)
 
-    async def find_person_by_alias(self, surface_form: str) -> Optional[tuple[str, str]]:
+    async def find_person_by_alias(
+        self, surface_form: str
+    ) -> Optional[tuple[str, str]]:
         for sf, pid, canonical in self.aliases:
             if sf == surface_form:
                 return pid, canonical
@@ -58,6 +61,7 @@ class _StubRepo:
 
 class _StubExtractor:
     """resolve_person should never reach the LLM for any of these tests."""
+
     async def resolve_alias_with_llm(self, name, candidates):  # pragma: no cover
         raise AssertionError(
             f"LLM was called unexpectedly: name={name!r}, candidates={candidates!r}"
@@ -72,6 +76,7 @@ def _seed(*pairs: tuple[str, str]) -> _StubRepo:
 
 
 # ── update_token_owners_and_recency: the bookkeeping primitive ───────────────
+
 
 def test_bookkeeping_only_records_recency_when_token_is_contested():
     """A token's first owner just gets added; recency stays empty until 2+ owners exist."""
@@ -97,13 +102,16 @@ def test_bookkeeping_ignores_short_tokens():
     """Anything below the min-len floor (default 4) is irrelevant."""
     token_owners: dict[str, set[str]] = {}
     recency: dict[str, str] = {}
-    update_token_owners_and_recency("p1", "Sam Lo", token_owners, recency)  # "sam" + "lo"
+    update_token_owners_and_recency(
+        "p1", "Sam Lo", token_owners, recency
+    )  # "sam" + "lo"
     # "lo" is 2 chars, "sam" is 3 chars → neither qualifies.
     assert token_owners == {}
     assert recency == {}
 
 
 # ── resolve_person: ambiguous sub-name behavioural cases ─────────────────────
+
 
 @pytest.mark.asyncio
 async def test_unique_subname_auto_accepts():
@@ -112,11 +120,15 @@ async def test_unique_subname_auto_accepts():
     recency: dict[str, str] = {}
 
     result = await resolve_person(
-        "Altman", repo, _StubExtractor(),
+        "Altman",
+        repo,
+        _StubExtractor(),
         recency=recency,
     )
 
-    assert result == ResolveResult(person_id="p1", canonical_name="Sam Altman", stage="subname")
+    assert result == ResolveResult(
+        person_id="p1", canonical_name="Sam Altman", stage="subname"
+    )
     # resolve_person doesn't write recency itself — that's _resolve_or_create's job.
     assert recency == {}
 
@@ -127,7 +139,9 @@ async def test_ambiguous_subname_no_recency_refuses():
     repo = _seed(("p1", "Anthony Ha"), ("p2", "Anthony Garcia"))
 
     result = await resolve_person(
-        "Anthony", repo, _StubExtractor(),
+        "Anthony",
+        repo,
+        _StubExtractor(),
         # recency intentionally NOT passed
     )
 
@@ -141,11 +155,15 @@ async def test_ambiguous_subname_recency_disambiguates():
     recency = {"anthony": "p1"}  # we just resolved Anthony Ha earlier in this article
 
     result = await resolve_person(
-        "Anthony", repo, _StubExtractor(),
+        "Anthony",
+        repo,
+        _StubExtractor(),
         recency=recency,
     )
 
-    assert result == ResolveResult(person_id="p1", canonical_name="Anthony Ha", stage="subname")
+    assert result == ResolveResult(
+        person_id="p1", canonical_name="Anthony Ha", stage="subname"
+    )
 
 
 @pytest.mark.asyncio
@@ -155,7 +173,9 @@ async def test_ambiguous_subname_recency_off_target_still_refuses():
     recency = {"smith": "px"}  # different family entirely
 
     result = await resolve_person(
-        "Anthony", repo, _StubExtractor(),
+        "Anthony",
+        repo,
+        _StubExtractor(),
         recency=recency,
     )
 
@@ -163,6 +183,7 @@ async def test_ambiguous_subname_recency_off_target_still_refuses():
 
 
 # ── dynamic detection: collision emerges *mid-article* ───────────────────────
+
 
 def test_dynamic_detection_mid_article_collision_bookkeeping():
     """
@@ -202,13 +223,17 @@ async def test_llm_fallback_disabled_skips_llm_returns_none():
     0.80, with no exact alias, no subname subset.
     """
     repo = _seed(("p1", "Sam Altman"))
-    extractor = _StubExtractor()  # raises AssertionError if .resolve_alias_with_llm is hit
+    extractor = (
+        _StubExtractor()
+    )  # raises AssertionError if .resolve_alias_with_llm is hit
 
     # With LLM disabled, we expect None even though "samuel altmen" would
     # otherwise reach the LLM (similarity in the 0.5-0.8 window via the
     # shared 'altmen' Levenshtein noise — and not a subname subset).
     result = await resolve_person(
-        "Samuel Altmen", repo, extractor,
+        "Samuel Altmen",
+        repo,
+        extractor,
         use_llm_fallback=False,
     )
 
@@ -237,7 +262,9 @@ async def test_end_to_end_mid_article_collision_then_bare_reference():
 
     # Step 1: "Anthony Ha" — alias hit, no LLM, no collision yet.
     res1 = await resolve_person("Anthony Ha", repo, _StubExtractor(), recency=recency)
-    assert res1 == ResolveResult(person_id="p1", canonical_name="Anthony Ha", stage="alias")
+    assert res1 == ResolveResult(
+        person_id="p1", canonical_name="Anthony Ha", stage="alias"
+    )
     update_token_owners_and_recency("p1", "Anthony Ha", token_owners, recency)
     assert recency == {}, "still only one owner of 'anthony'"
 
@@ -251,7 +278,9 @@ async def test_end_to_end_mid_article_collision_then_bare_reference():
     # Step 3: bare "Anthony" — must use recency to land on Anthony Garcia.
     res3 = await resolve_person("Anthony", repo, _StubExtractor(), recency=recency)
     assert res3 == ResolveResult(
-        person_id="p2", canonical_name="Anthony Garcia", stage="subname",
+        person_id="p2",
+        canonical_name="Anthony Garcia",
+        stage="subname",
     ), (
         "bare 'Anthony' should resolve to the most-recently-saved Anthony "
         "via the recency mechanism populated mid-article"

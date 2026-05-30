@@ -23,8 +23,8 @@ from fastapi.testclient import TestClient
 from app.api.routes import router as api_router
 from app.core.graph_service import GraphService
 
-
 # ── stub service ─────────────────────────────────────────────────────────────
+
 
 class _StubService:
     """
@@ -49,7 +49,9 @@ class _StubService:
             raise self.process_article_raises
         return self.process_article_result
 
-    async def rescan(self, pages, sentences_per_chunk=None, source_ids=None, max_parallel=None):
+    async def rescan(
+        self, pages, sentences_per_chunk=None, source_ids=None, max_parallel=None
+    ):
         self.rescan_calls.append((pages, sentences_per_chunk))
         self.last_max_parallel = max_parallel
         return self.rescan_result
@@ -66,11 +68,13 @@ class _StubService:
 
 # ── helpers to build TestClient with stub injected ────────────────────────────
 
+
 def _make_app(svc: _StubService) -> FastAPI:
     app = FastAPI()
     app.include_router(api_router)
     # Override the dependency provider — routes get the stub, not the real svc.
     from app.api.deps import get_graph_service
+
     app.dependency_overrides[get_graph_service] = lambda: svc
     return app
 
@@ -78,6 +82,7 @@ def _make_app(svc: _StubService) -> FastAPI:
 # ─────────────────────────────────────────────────────────────────────────────
 # POST /articles
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def test_post_articles_returns_200_with_summary():
     svc = _StubService()
@@ -109,8 +114,10 @@ def test_post_articles_returns_200_with_summary():
 def test_post_articles_passes_sentences_per_chunk_through():
     svc = _StubService()
     svc.process_article_result = {
-        "article_id": "a-2", "title": None,
-        "people_resolved": 0, "relationships_stored": 0,
+        "article_id": "a-2",
+        "title": None,
+        "people_resolved": 0,
+        "relationships_stored": 0,
         "status": "already_exists",
     }
     client = TestClient(_make_app(svc))
@@ -169,6 +176,7 @@ def test_post_articles_rejects_invalid_url():
 # POST /rescan
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def test_post_rescan_reports_complete_when_no_errors():
     svc = _StubService()
     svc.counts_seq = [(2, 5), (4, 9)]  # before, after
@@ -186,8 +194,8 @@ def test_post_rescan_reports_complete_when_no_errors():
     assert resp.status_code == 200
     body = resp.json()
     assert body["pages_crawled"] == 2
-    assert body["new_people"] == 2          # 4 - 2
-    assert body["new_relationships"] == 4   # 9 - 5
+    assert body["new_people"] == 2  # 4 - 2
+    assert body["new_relationships"] == 4  # 9 - 5
     assert body["status"] == "complete"
 
 
@@ -195,8 +203,11 @@ def test_post_rescan_reports_partial_on_errors():
     svc = _StubService()
     svc.counts_seq = [(0, 0), (1, 1)]
     svc.rescan_result = {
-        "pages_crawled": 1, "articles_processed": 1, "articles_skipped": 0,
-        "relationships_stored": 1, "errors": ["http://x: boom"],
+        "pages_crawled": 1,
+        "articles_processed": 1,
+        "articles_skipped": 0,
+        "relationships_stored": 1,
+        "errors": ["http://x: boom"],
     }
     client = TestClient(_make_app(svc))
 
@@ -210,8 +221,10 @@ def test_post_rescan_reports_partial_on_errors():
 # GET /people
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class _FakePerson:
     """Stand-in for the Person ORM row — only fields the route reads."""
+
     def __init__(self, pid: str, name: str, aliases: list[str]) -> None:
         self.id = pid
         self.canonical_name = name
@@ -243,7 +256,8 @@ def test_get_people_paginates():
     assert body["page_size"] == 2
     assert body["total_pages"] == 4  # ceil(7/2)
     assert [item["canonical_name"] for item in body["items"]] == [
-        "Elon Musk", "Sam Altman",
+        "Elon Musk",
+        "Sam Altman",
     ]
 
 
@@ -259,6 +273,7 @@ def test_get_people_rejects_bad_pagination():
 # ─────────────────────────────────────────────────────────────────────────────
 # GET /people/{id}
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class _FakeRel:
     def __init__(self, rid, src, tgt, rel_type, explanation, provenance) -> None:
@@ -305,7 +320,11 @@ def test_get_person_returns_full_detail_with_provenance():
     p2 = _FakePerson("p2", "Elon Musk", ["elon musk"])
     article = _FakeArticle("art-1", "https://example.com/a", "Title")
     rel = _FakeRel(
-        "r-1", p2, p1, "criticizes", "explanation here",
+        "r-1",
+        p2,
+        p1,
+        "criticizes",
+        "explanation here",
         [_FakeProv("pv-1", article, "Musk slammed Altman's decision.")],
     )
     svc.detail_result = {"person": p1, "relationships": [rel]}
@@ -331,6 +350,7 @@ def test_get_person_returns_full_detail_with_provenance():
 # ─────────────────────────────────────────────────────────────────────────────
 # /health (smoke)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def test_health_endpoint():
     # /health lives on the root app (main.py), not on api_router, so build

@@ -37,10 +37,10 @@ _async_session: async_sessionmaker | None = None
 # Use defaults so existing rows get a sensible value without a separate UPDATE.
 
 _ARTICLES_NEW_COLUMNS: list[tuple[str, str]] = [
-    ("body_hash",            "VARCHAR"),
-    ("sentences_per_chunk",  "INTEGER"),
-    ("total_chunks",         "INTEGER"),
-    ("chunks_processed",     "INTEGER NOT NULL DEFAULT 0"),
+    ("body_hash", "VARCHAR"),
+    ("sentences_per_chunk", "INTEGER"),
+    ("total_chunks", "INTEGER"),
+    ("chunks_processed", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 
@@ -55,9 +55,7 @@ def _migrate_pending_columns(sync_conn: Connection) -> None:
     for col_name, col_ddl in _ARTICLES_NEW_COLUMNS:
         if col_name in existing:
             continue
-        sync_conn.execute(
-            text(f"ALTER TABLE articles ADD COLUMN {col_name} {col_ddl}")
-        )
+        sync_conn.execute(text(f"ALTER TABLE articles ADD COLUMN {col_name} {col_ddl}"))
         added.append(col_name)
     if added:
         logger.info("Migrated articles table: added column(s) %s", added)

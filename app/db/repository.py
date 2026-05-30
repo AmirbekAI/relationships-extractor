@@ -47,7 +47,9 @@ class GraphRepository:
 
     # ──────────────────────────────────────────────────────────────── People
 
-    async def get_or_create_person(self, canonical_name: str, bio: str | None = None) -> str:
+    async def get_or_create_person(
+        self, canonical_name: str, bio: str | None = None
+    ) -> str:
         """Return existing person id or create a new one."""
         result = await self._s.execute(
             select(Person.id).where(Person.canonical_name == canonical_name)
@@ -61,7 +63,9 @@ class GraphRepository:
             # SAVEPOINT: a concurrent insert of the same canonical_name rolls
             # back only this insert, not the caller's outer transaction.
             async with self._s.begin_nested():
-                self._s.add(Person(id=person_id, canonical_name=canonical_name, bio=bio))
+                self._s.add(
+                    Person(id=person_id, canonical_name=canonical_name, bio=bio)
+                )
         except IntegrityError:
             result = await self._s.execute(
                 select(Person.id).where(Person.canonical_name == canonical_name)
@@ -149,7 +153,9 @@ class GraphRepository:
             # SAVEPOINT: if the surface form was inserted concurrently, undo
             # just this insert and leave the outer transaction usable.
             async with self._s.begin_nested():
-                self._s.add(Alias(id=_uuid(), surface_form=surface_form, person_id=person_id))
+                self._s.add(
+                    Alias(id=_uuid(), surface_form=surface_form, person_id=person_id)
+                )
         except IntegrityError:
             pass  # inserted concurrently — fine
 
@@ -159,8 +165,9 @@ class GraphRepository:
         Used by the entity resolver to build its lookup table.
         """
         result = await self._s.execute(
-            select(Alias.surface_form, Person.id, Person.canonical_name)
-            .join(Person, Person.id == Alias.person_id)
+            select(Alias.surface_form, Person.id, Person.canonical_name).join(
+                Person, Person.id == Alias.person_id
+            )
         )
         return result.all()
 
@@ -195,22 +202,26 @@ class GraphRepository:
             return existing_id
 
         article_id = _uuid()
-        self._s.add(Article(
-            id=article_id,
-            url=url,
-            title=title,
-            published_at=published_at,
-            author=author,
-            source=source,
-            body_hash=body_hash,
-            sentences_per_chunk=sentences_per_chunk,
-            total_chunks=total_chunks,
-            chunks_processed=0,
-        ))
+        self._s.add(
+            Article(
+                id=article_id,
+                url=url,
+                title=title,
+                published_at=published_at,
+                author=author,
+                source=source,
+                body_hash=body_hash,
+                sentences_per_chunk=sentences_per_chunk,
+                total_chunks=total_chunks,
+                chunks_processed=0,
+            )
+        )
         await self._s.flush()
         return article_id
 
-    async def update_chunk_progress(self, article_id: str, chunks_processed: int) -> None:
+    async def update_chunk_progress(
+        self, article_id: str, chunks_processed: int
+    ) -> None:
         """Bump the checkpoint pointer after a chunk has been durably stored."""
         article = await self._s.get(Article, article_id)
         if article is not None:
@@ -285,13 +296,15 @@ class GraphRepository:
             return existing_id
 
         rel_id = _uuid()
-        self._s.add(Relationship(
-            id=rel_id,
-            source_person_id=source_person_id,
-            target_person_id=target_person_id,
-            relation_type=relation_type,
-            explanation=explanation,
-        ))
+        self._s.add(
+            Relationship(
+                id=rel_id,
+                source_person_id=source_person_id,
+                target_person_id=target_person_id,
+                relation_type=relation_type,
+                explanation=explanation,
+            )
+        )
         await self._s.flush()
         return rel_id
 
@@ -310,15 +323,19 @@ class GraphRepository:
         )
         if existing.scalar_one_or_none():
             return
-        self._s.add(Provenance(
-            id=_uuid(),
-            relationship_id=relationship_id,
-            article_id=article_id,
-            quote=quote,
-        ))
+        self._s.add(
+            Provenance(
+                id=_uuid(),
+                relationship_id=relationship_id,
+                article_id=article_id,
+                quote=quote,
+            )
+        )
         await self._s.flush()
 
-    async def get_provenance_for_relationship(self, relationship_id: str) -> list[Provenance]:
+    async def get_provenance_for_relationship(
+        self, relationship_id: str
+    ) -> list[Provenance]:
         result = await self._s.execute(
             select(Provenance).where(Provenance.relationship_id == relationship_id)
         )

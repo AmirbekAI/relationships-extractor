@@ -30,37 +30,110 @@ logger = logging.getLogger(__name__)
 # Stored as lowercase, whitespace-collapsed. Add new entries here.
 # Focused on tech orgs + major media since the pipeline ingests tech news.
 
-KNOWN_ORGANIZATIONS: frozenset[str] = frozenset({
-    # AI / tech companies
-    "openai", "anthropic", "google", "alphabet", "google deepmind", "deepmind",
-    "microsoft", "meta", "facebook", "instagram", "whatsapp",
-    "amazon", "aws", "apple", "nvidia", "tesla", "spacex",
-    "x", "twitter", "xai", "x.ai",
-    "ibm", "oracle", "salesforce", "adobe", "intel", "amd",
-    "samsung", "sony", "cerebras", "groq", "perplexity",
-    "stability ai", "stability", "hugging face", "huggingface",
-    "mistral", "mistral ai", "scale ai", "scale",
-    "y combinator", "yc",
-    # Major media — pipeline source itself, but body text might mention others
-    "techcrunch", "the verge", "wired", "bloomberg", "reuters",
-    "the new york times", "nyt", "the washington post", "wsj",
-    "the wall street journal", "bbc", "cnn", "cnbc", "the information",
-    # Government / regulatory bodies that occasionally appear as subjects
-    "ftc", "sec", "doj", "fbi", "eu", "european union", "white house",
-    "congress", "senate", "house", "supreme court",
-    # Vague collective subjects the LLM sometimes anthropomorphises
-    "the board", "the company", "the team", "the firm",
-})
+KNOWN_ORGANIZATIONS: frozenset[str] = frozenset(
+    {
+        # AI / tech companies
+        "openai",
+        "anthropic",
+        "google",
+        "alphabet",
+        "google deepmind",
+        "deepmind",
+        "microsoft",
+        "meta",
+        "facebook",
+        "instagram",
+        "whatsapp",
+        "amazon",
+        "aws",
+        "apple",
+        "nvidia",
+        "tesla",
+        "spacex",
+        "x",
+        "twitter",
+        "xai",
+        "x.ai",
+        "ibm",
+        "oracle",
+        "salesforce",
+        "adobe",
+        "intel",
+        "amd",
+        "samsung",
+        "sony",
+        "cerebras",
+        "groq",
+        "perplexity",
+        "stability ai",
+        "stability",
+        "hugging face",
+        "huggingface",
+        "mistral",
+        "mistral ai",
+        "scale ai",
+        "scale",
+        "y combinator",
+        "yc",
+        # Major media — pipeline source itself, but body text might mention others
+        "techcrunch",
+        "the verge",
+        "wired",
+        "bloomberg",
+        "reuters",
+        "the new york times",
+        "nyt",
+        "the washington post",
+        "wsj",
+        "the wall street journal",
+        "bbc",
+        "cnn",
+        "cnbc",
+        "the information",
+        # Government / regulatory bodies that occasionally appear as subjects
+        "ftc",
+        "sec",
+        "doj",
+        "fbi",
+        "eu",
+        "european union",
+        "white house",
+        "congress",
+        "senate",
+        "house",
+        "supreme court",
+        # Vague collective subjects the LLM sometimes anthropomorphises
+        "the board",
+        "the company",
+        "the team",
+        "the firm",
+    }
+)
 
 
 # ── corporate suffixes ───────────────────────────────────────────────────────
 # Matched against the LAST whitespace token of the name, after stripping
 # trailing punctuation. Conservative — only unambiguous corporate tails.
 
-ORG_SUFFIXES: frozenset[str] = frozenset({
-    "inc", "corp", "corporation", "ltd", "limited", "llc", "llp",
-    "gmbh", "ag", "sa", "plc", "pty", "bv", "nv", "holdings",
-})
+ORG_SUFFIXES: frozenset[str] = frozenset(
+    {
+        "inc",
+        "corp",
+        "corporation",
+        "ltd",
+        "limited",
+        "llc",
+        "llp",
+        "gmbh",
+        "ag",
+        "sa",
+        "plc",
+        "pty",
+        "bv",
+        "nv",
+        "holdings",
+    }
+)
 
 
 # ── placeholder / unknown markers ────────────────────────────────────────────
@@ -68,18 +141,33 @@ ORG_SUFFIXES: frozenset[str] = frozenset({
 # 'Author: Unknown' when the crawler couldn't find a byline. Caught as
 # "non-person" by the same predicate the org check uses.
 
-KNOWN_PLACEHOLDERS: frozenset[str] = frozenset({
-    "unknown", "anonymous", "anon", "n/a", "na",
-    "unspecified", "unattributed", "not specified",
-    "no author", "no byline", "staff writer", "staff",
-    "editor", "editorial staff", "the editors",
-    "tba", "tbd",
-})
+KNOWN_PLACEHOLDERS: frozenset[str] = frozenset(
+    {
+        "unknown",
+        "anonymous",
+        "anon",
+        "n/a",
+        "na",
+        "unspecified",
+        "unattributed",
+        "not specified",
+        "no author",
+        "no byline",
+        "staff writer",
+        "staff",
+        "editor",
+        "editorial staff",
+        "the editors",
+        "tba",
+        "tbd",
+    }
+)
 
 _TRAILING_PUNCT = re.compile(r"[.,;:!?]+$")
 
 
 # ── core predicate ───────────────────────────────────────────────────────────
+
 
 def _normalise_for_match(name: str) -> str:
     """Lowercase + collapse internal whitespace — does NOT strip honorifics
@@ -120,10 +208,11 @@ def is_likely_organization(name: str) -> bool:
 
 # ── filter ───────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class FilterReport:
     dropped_people: list[str]
-    dropped_relationships: list[tuple[str, str, str]]   # (src, tgt, type)
+    dropped_relationships: list[tuple[str, str, str]]  # (src, tgt, type)
 
     @property
     def n_dropped_people(self) -> int:
@@ -176,7 +265,8 @@ def filter_extraction(people, relationships):
     if report.n_dropped_people or report.n_dropped_relationships:
         logger.info(
             "Filter dropped %d org-people, %d org-touching relationships: %s",
-            report.n_dropped_people, report.n_dropped_relationships,
+            report.n_dropped_people,
+            report.n_dropped_relationships,
             report.dropped_people,
         )
 

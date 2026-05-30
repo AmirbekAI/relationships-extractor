@@ -35,6 +35,7 @@ GOLD_PATH = Path(__file__).parent / "gold" / "alias_pairs.json"
 
 # ── eval ─────────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class PairResult:
     surface: str
@@ -81,18 +82,21 @@ async def evaluate_resolver(extractor: LLMExtractor) -> list[PairResult]:
             repo = GraphRepository(session)
             resolved = await resolve_person(pair["surface"], repo, extractor)
 
-        results.append(PairResult(
-            surface=pair["surface"],
-            expected=pair["expected"],
-            expected_stage=pair["expected_stage"],
-            got=resolved.canonical_name if resolved else None,
-            got_stage=resolved.stage if resolved else "none",
-        ))
+        results.append(
+            PairResult(
+                surface=pair["surface"],
+                expected=pair["expected"],
+                expected_stage=pair["expected_stage"],
+                got=resolved.canonical_name if resolved else None,
+                got_stage=resolved.stage if resolved else "none",
+            )
+        )
 
     return results
 
 
 # ── temp-DB wiring ───────────────────────────────────────────────────────────
+
 
 class TempEvalDB:
     """
@@ -120,6 +124,7 @@ class TempEvalDB:
 
 # ── pretty printing ──────────────────────────────────────────────────────────
 
+
 def render_report(results: list[PairResult]) -> str:
     total = len(results)
     name_correct = sum(1 for r in results if r.name_correct)
@@ -140,9 +145,13 @@ def render_report(results: list[PairResult]) -> str:
             f"| {r.expected_stage:<11s} / {(r.got_stage or '?'):<11s} | {ok}"
         )
     lines.append("")
-    lines.append(f"  Name accuracy:  {name_correct}/{total}  "
-                 f"({100 * name_correct / total:.1f}%)")
-    lines.append(f"  Stage accuracy: {stage_correct}/{total}  "
-                 f"({100 * stage_correct / total:.1f}%)")
+    lines.append(
+        f"  Name accuracy:  {name_correct}/{total}  "
+        f"({100 * name_correct / total:.1f}%)"
+    )
+    lines.append(
+        f"  Stage accuracy: {stage_correct}/{total}  "
+        f"({100 * stage_correct / total:.1f}%)"
+    )
     lines.append("═" * 72)
     return "\n".join(lines)

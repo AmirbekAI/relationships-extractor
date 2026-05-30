@@ -36,7 +36,6 @@ from app.crawlers.base import ArticleContent, BaseCrawler, CrawlerRegistry
 from app.db.repository import GraphRepository
 from app.db.session import get_session, init_db
 
-
 # ── stubs ────────────────────────────────────────────────────────────────────
 
 # 4 chunks worth of sentences. With sentences_per_chunk=2 the splitter will
@@ -82,12 +81,13 @@ class _CountingExtractor:
 
     def __init__(self, *, fail_on_chunk: int | None = None) -> None:
         self.fail_on_chunk = fail_on_chunk
-        self.calls: list[int] = []   # chunk indices we extracted (success path)
+        self.calls: list[int] = []  # chunk indices we extracted (success path)
 
     def split_chunks(self, article, sentences_per_chunk):
         # Same splitter LLMExtractor uses, so chunk count matches what the
         # service computes.
         from app.extractors.llm_extractor import _chunk, _split_sentences
+
         return _chunk(_split_sentences(article.body_text), sentences_per_chunk)
 
     async def extract_one_chunk(self, article, chunk_text, idx, total):
@@ -124,6 +124,7 @@ class _CountingExtractor:
 
 
 # ── fixtures ─────────────────────────────────────────────────────────────────
+
 
 @pytest_asyncio.fixture
 async def temp_db():
@@ -174,10 +175,10 @@ async def test_crash_mid_article_then_resume(temp_db):
     summary_a = await svc.process_article(URL, sentences_per_chunk=2)
 
     assert summary_a["status"] == "processed"
-    assert summary_a["chunks_processed"] == 2     # 0 and 1 succeeded
-    assert summary_a["total_chunks"] == 4         # 8 sentences / 2 = 4 chunks
+    assert summary_a["chunks_processed"] == 2  # 0 and 1 succeeded
+    assert summary_a["total_chunks"] == 4  # 8 sentences / 2 = 4 chunks
     assert summary_a["extraction_error"] is not None
-    assert failing.calls == [0, 1]                # only the successful ones
+    assert failing.calls == [0, 1]  # only the successful ones
 
     # DB-side: article row exists, chunks_processed == 2, two relationships.
     async with get_session() as session:
@@ -192,22 +193,22 @@ async def test_crash_mid_article_then_resume(temp_db):
 
     # Phase B — replace the extractor with a working one and re-run.
     working = _CountingExtractor(fail_on_chunk=None)
-    svc.b_extractor = working                      # keep a handle for inspection
+    svc.b_extractor = working  # keep a handle for inspection
     svc._extractor = working
     summary_b = await svc.process_article(URL, sentences_per_chunk=2)
 
     assert summary_b["status"] == "processed"
-    assert summary_b["chunks_processed"] == 4      # done
+    assert summary_b["chunks_processed"] == 4  # done
     assert summary_b["total_chunks"] == 4
     assert summary_b["extraction_error"] is None
-    assert working.calls == [2, 3]                 # ONLY the remaining chunks
+    assert working.calls == [2, 3]  # ONLY the remaining chunks
 
     async with get_session() as session:
         repo = GraphRepository(session)
         art = await repo.get_article_by_url(URL)
         assert art.chunks_processed == 4
         n_rels = await repo.count_relationships()
-        assert n_rels == 4                         # 0+1+2+3 stored
+        assert n_rels == 4  # 0+1+2+3 stored
 
 
 @pytest.mark.asyncio
@@ -236,10 +237,7 @@ async def test_body_hash_change_triggers_clean_restart(temp_db):
 
     # Phase 2: swap the crawler for one that returns a SHORTER body
     # (2 chunks, not 4) so the chunk-count mismatch is also exercised.
-    new_body = (
-        "Sam Altman gave a keynote. "
-        "Microsoft announced a new partnership."
-    )
+    new_body = "Sam Altman gave a keynote. " "Microsoft announced a new partnership."
     CrawlerRegistry._registry.clear()
     CrawlerRegistry.register(_FakeCrawler(body=new_body))
 
@@ -251,7 +249,7 @@ async def test_body_hash_change_triggers_clean_restart(temp_db):
     # New body → 2 sentences → 1 chunk of size 2.
     assert summary2["total_chunks"] == 1
     assert summary2["chunks_processed"] == 1
-    assert extractor2.calls == [0]                  # re-ran from scratch
+    assert extractor2.calls == [0]  # re-ran from scratch
 
     async with get_session() as session:
         repo = GraphRepository(session)
